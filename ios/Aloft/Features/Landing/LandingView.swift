@@ -50,6 +50,7 @@ struct LandingView: View {
                         .textStyle(.body).foregroundStyle(Palette.inkMuted)
                 }
                 VStack(spacing: Space.s3) { doors }
+                bandCheck
             }
             .padding(.horizontal, Space.s5)
             .padding(.bottom, Space.s3)
@@ -63,6 +64,7 @@ struct LandingView: View {
                 VStack(alignment: .leading, spacing: Space.s5) {
                     pitch
                     HStack(spacing: Space.s3) { doors }
+                    bandCheck
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -77,6 +79,7 @@ struct LandingView: View {
                     pitch
                     Spacer()
                     HStack(spacing: Space.s3) { doors }
+                    bandCheck
                 }
                 .padding(.top, geo.size.height / 2 + 28)
                 .padding(.horizontal, Space.s6)
@@ -98,6 +101,12 @@ struct LandingView: View {
             + Text("Your sky shows how ready you are. Your Crew shares it with you.").foregroundStyle(Palette.inkMuted))
             .textStyle(.body)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var bandCheck: some View {
+        Button("Check your band") { model.route = .bandCheck }
+            .buttonStyle(.link)
+            .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder

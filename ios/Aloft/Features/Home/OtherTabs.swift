@@ -105,7 +105,8 @@ struct LiftComposer: View {
 // MARK: Log
 
 /// The milestone 1 debug view: link, last sync, last error, store path and
-/// row counts, recent log lines, copy and share. Nothing is uploaded.
+/// row counts, recent log lines, and the full trace file to share. Nothing is
+/// uploaded.
 struct LogTab: View {
     @Environment(AppModel.self) private var model
     @Environment(\.paneSplit) private var split
@@ -129,7 +130,11 @@ struct LogTab: View {
                 }
                 HStack(spacing: Space.s3) {
                     Button("Find band") { strap.startScan() }.buttonStyle(.ghost)
-                    ShareLink(item: report(strap)) { Text("Share log") }.buttonStyle(.ghost)
+                    if strap.trace.files.isEmpty {
+                        ShareLink(item: report(strap)) { Text("Share log") }.buttonStyle(.ghost)
+                    } else {
+                        ShareLink(items: strap.trace.files, message: Text(report(strap))) { Text("Share log") }.buttonStyle(.ghost)
+                    }
                 }
                 Stamp("Recent")
                 VStack(alignment: .leading, spacing: 2) {
@@ -146,7 +151,7 @@ struct LogTab: View {
             .padding(.horizontal, split == .single ? Space.s5 : 40)
             .padding(.vertical, Space.s5)
         }
-        .task { counts = try? await strap.store?.counts() }
+        .task(id: strap.lastSync) { counts = try? await strap.store?.counts() }
     }
 
     private func row(_ label: String, _ value: String, last: Bool = false) -> some View {
@@ -178,6 +183,24 @@ struct LogTab: View {
         if let counts { lines.append("hr: \(counts.heartRate), rr: \(counts.rr)") }
         if let error = strap.lastError { lines.append("last error: \(error)") }
         return (lines + strap.log.suffix(80)).joined(separator: "\n")
+    }
+}
+
+/// The Log tab before an account exists, opened from Landing.
+struct BandCheckView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.paneSplit) private var split
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("Back") { model.route = .landing }.buttonStyle(.link)
+                Spacer()
+            }
+            .padding(.horizontal, split == .single ? Space.s5 : 40)
+            LogTab()
+        }
+        .background(Palette.ground.ignoresSafeArea())
     }
 }
 

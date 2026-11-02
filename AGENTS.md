@@ -47,7 +47,7 @@ ios/Packages/AloftStrap/  framing, commands, history state, SQLite store. No Swi
 | Any screen | iPhone Duo simulator and a normal iPhone simulator. Debug builds take `-AloftPreview <screen>` (sample data, no network) and `-AloftRenderBoards 1` (renders every screen at the Duo's open 890×626 and 626×890 into Documents/boards) |
 | Backend service rules | `make test-backend` (in-memory store) |
 | Backend SQL | `make test-backend-db` against a Neon branch, never `main` |
-| Pair, bond, sync, live HR | Physical iPhone and the strap. Say so in the PR when this was not run |
+| Pair, bond, sync, live HR | Physical iPhone and the strap. Say so in the PR when this was not run. "Check your band" on Landing opens the Log tab without an account; "Share log" exports `strap-trace.log` (every Bluetooth step, packets as hex). With a cable in, Console.app shows the same steps under subsystem `aloft`, category `strap`. Traces hold heart rate: read them, never commit them |
 
 ## Do not bring over
 
