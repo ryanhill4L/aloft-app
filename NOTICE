@@ -1,0 +1,54 @@
+NOTICE
+======
+
+Aloft
+-----
+
+Copyright 2026 Ryan Hill
+
+Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+Commercial use is not granted.
+
+Required Notice: Copyright 2026 NoopApp
+
+NOOP
+----
+
+Aloft's strap behavior is derived from NOOP, an offline WHOOP companion.
+
+- Upstream (public): https://github.com/ryanbr/noop
+  Pinned for these docs at 2a1de7609843b095505274ad6fc811757210be80.
+  License file: https://github.com/ryanbr/noop/blob/2a1de7609843b095505274ad6fc811757210be80/LICENSE
+  Confirmed in that file: PolyForm Noncommercial License 1.0.0, Copyright 2026 NoopApp.
+  The same LICENSE blob (sha b40834319bf79d0cf88ac46fb683dc21fa661cd9) is at the
+  root of the private fork https://github.com/ryanhill4L/noop
+
+- Private fork used as the lesson source: https://github.com/ryanhill4L/noop
+  HEAD 0a6bad593a8966cd0d48056b40e362dcca4d040a.
+  WAL durability fix: pull request 3, merge ec3032010ff177098b304394d4a37380d4661264.
+
+NOOP's LICENSE limits itself to NOOP's original source and documentation. It
+says the protocol facts in that repository are uncopyrightable facts about
+bytes on a wire. Aloft's docs summarize those facts and link to the files.
+A later port of NOOP source stays under PolyForm Noncommercial and must keep
+this notice.
+
+Prior research NOOP credits, and which Aloft does not copy source from
+-----------------------------------------------------------------------
+
+NOOP's NOTICE says these projects state no license, and that NOOP reimplemented
+facts rather than redistributing their code. Aloft does the same. Do not paste
+their source into this repo.
+
+- johnmiddleton12/my-whoop — https://github.com/johnmiddleton12/my-whoop
+  WHOOP 4.0 protocol facts.
+- b-nnett/goose — https://github.com/b-nnett/goose
+  WHOOP 5.0 / MG ("puffin") protocol facts.
+
+Dependencies
+------------
+
+None yet. When the store is written, NOOP uses GRDB.swift (MIT) over SQLite.
+If Aloft takes that dependency, keep GRDB's MIT license beside this notice and
+do not treat the combined work as commercially licensed. ZIPFoundation (MIT)
+is an upstream NOOP dependency for export import; Aloft has no import path yet.

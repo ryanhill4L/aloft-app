@@ -1,0 +1,6 @@
+---
+description: Aloft orientation. Read AGENTS.md before editing.
+alwaysApply: true
+---
+
+Read AGENTS.md at the repo root before changing this project. Aloft is Ryan Hill's on-device WHOOP strap app, restarted from zero. Follow the hard rules there: small verifiable PRs, on-device data only, no secrets or personal data, noncommercial PolyForm license, and no merge to main or TestFlight without Ryan's explicit yes.
