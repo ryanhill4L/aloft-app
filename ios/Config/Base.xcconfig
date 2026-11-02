@@ -1,0 +1,9 @@
+// Shared settings. No real bundle or team id is checked in: put yours in
+// Config/Local.xcconfig (untracked), for example
+//   ALOFT_BUNDLE_ID = com.yourname.aloft
+//   ALOFT_TEAM_ID = ABCDE12345
+ALOFT_BUNDLE_ID = invalid.aloft.local
+ALOFT_TEAM_ID =
+
+// "//" starts a comment in xcconfig; $() keeps the URL intact.
+NEON_AUTH_ORIGIN = http:/$()/localhost

@@ -1,6 +1,6 @@
 # Design
 
-Milestone 1 is a debug screen: system form, monospaced log lines, no custom brand. The notes below apply from milestone 2.
+The visual source is now the Aloft design canvas (decision 7): its tokens are in `ios/Aloft/Design/Theme.swift`, its components in `Components.swift`, and its fold-aware screen frame in `AdaptiveLayout.swift`. Recovery shows as weather (Clear, Fair, Overcast), not WHOOP's green, yellow, and red. The WHOOP notes below remain as background for scores. The layout rules under "iPhone Duo and a normal iPhone" still hold.
 
 ## Direction
 

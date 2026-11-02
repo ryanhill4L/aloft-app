@@ -1,0 +1,16 @@
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: backend/gen
+    opt: module=aloft/gen
+  - local: protoc-gen-connect-go
+    out: backend/gen
+    opt: module=aloft/gen
+  - local: protoc-gen-swift
+    out: ios/Aloft/Gen
+    opt: Visibility=Public
+  - local: protoc-gen-connect-swift
+    out: ios/Aloft/Gen
+    opt:
+      - Visibility=Public
+      - GenerateCallbackMethods=false

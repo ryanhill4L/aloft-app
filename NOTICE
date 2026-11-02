@@ -48,7 +48,23 @@ their source into this repo.
 Dependencies
 ------------
 
-None yet. When the store is written, NOOP uses GRDB.swift (MIT) over SQLite.
-If Aloft takes that dependency, keep GRDB's MIT license beside this notice and
-do not treat the combined work as commercially licensed. ZIPFoundation (MIT)
-is an upstream NOOP dependency for export import; Aloft has no import path yet.
+The strap package (ios/Packages/AloftStrap) uses the system SQLite library
+directly; there is no GRDB dependency. Its framing, CRC parameters, offsets,
+and test vectors are facts read from NOOP at the pin above and rewritten, not
+copied.
+
+iOS app (Swift Package Manager):
+- connect-swift (Apache-2.0) — https://github.com/connectrpc/connect-swift
+- swift-protobuf (Apache-2.0) — https://github.com/apple/swift-protobuf
+
+Go backend (go.mod lists exact versions):
+- connectrpc.com/connect (Apache-2.0), google.golang.org/protobuf (BSD-3-Clause)
+- github.com/jackc/pgx/v5 (MIT), github.com/pressly/goose/v3 (MIT)
+- github.com/golang-jwt/jwt/v5 (MIT), github.com/MicahParks/keyfunc/v3 (Apache-2.0)
+- github.com/joho/godotenv (MIT), github.com/stretchr/testify (MIT, tests only)
+
+Fonts (SIL Open Font License 1.1; license texts in
+ios/Aloft/Resources/Fonts/licenses):
+- Host Grotesk — Copyright The Host Grotesk Project Authors
+- IBM Plex Mono — Copyright IBM Corp.
+- Newsreader — Copyright The Newsreader Project Authors
