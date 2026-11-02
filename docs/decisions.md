@@ -25,3 +25,31 @@ Date: 2026-11-02. Status: accepted.
 The interface to aim at is the official WHOOP app: dark, recovery / strain / sleep first. NOOP's shipped look is Charge / Effort / Rest on a 0–100 effort scale, with its own design system. The fork's onboarding figure (camera and photo-library purpose strings in `project.yml`) is the Neka-style surface to leave behind. Milestone 1 is a debug screen and does not pick colors.
 
 Date: 2026-11-02. Status: accepted. The strain dial's numeric scale (0–21 vs 0–100) is open; see [design.md](design.md).
+
+## 5. A backend for the profile and the Crew (partly reverses 3)
+
+Ryan asked for a backend in Go with the database and auth on Neon, because Aloft needs a profile and a Crew. Health data still stays on the phone: heart rate, R-R, HRV, sleep, and scores live in the on-device store and Apple Health. The server holds the profile (name, birth year, height, weight, sleep window), Crew membership, one weather word per person per day (Clear, Fair, Overcast), and Lifts. A Crew sees weather, never numbers. The strap path makes no network calls. Ryan expects to sync health chunks to the backend later; that needs its own entry before any code.
+
+Shape copies the lockecoffee monorepo: `proto/` is the contract, Connect-RPC over HTTP, generated Go and Swift, goose migrations that run at server start, Neon-tuned `database/sql` pool. Smaller on purpose: one service, `log/slog`, pgx instead of lib/pq.
+
+Date: 2026-11-02. Status: accepted.
+
+## 6. Sign-in is email code or Apple, through Neon Auth
+
+The design signed people up by phone number. Neon's managed Better Auth supports phone OTP for existing users only, with a bring-your-own SMS provider, so Ryan chose email or Apple instead and no phone number. The app calls Neon Auth's REST endpoints directly (`/email-otp/send-verification-otp`, `/sign-in/email-otp`, `/sign-in/social` with an Apple identity token), keeps the session cookies in the Keychain, and trades them for a 15-minute EdDSA JWT from `/get-session`. The Go API verifies that JWT against the branch's JWKS and uses `sub` as the user id.
+
+Open: Apple sign-in needs the Apple provider configured in Neon (client id = the real bundle id) and a team id in `ios/Config/Local.xcconfig`. Neither is in git. Production email needs a custom SMTP provider in Neon; the shared sender is for development.
+
+Date: 2026-11-02. Status: accepted.
+
+## 7. The Aloft design canvas is the visual source (supersedes the look in 4)
+
+The Aloft design (11 screens in five iPhone Duo postures, its own tokens) replaces "follow the official WHOOP app" for color and type. Recovery bands become weather words: Clear (sky) 67–100, Fair 34–66, Overcast 0–33, never red. Type is Host Grotesk, IBM Plex Mono, and Newsreader italic (all OFL, bundled). Layout still follows design.md's rule: split by window size, never by device or hinge. Posture-only ideas in the canvas (resting the band on the open screen to pair, the half-folded sky clock) are not built: they need posture detection or hardware behavior that does not exist.
+
+Date: 2026-11-02. Status: accepted.
+
+## 8. Strap package: AloftStrap, system SQLite
+
+Closes the open question in 2. The package is `AloftStrap` and talks to the system SQLite C API directly instead of taking GRDB. `StrapStore.insert` folds the WAL (PASSIVE, then FULL if frames remain) before it returns; `HistorySync` acks only after that. Tests cover the main-file-only copy and a relaunch with `-wal`/`-shm` deleted.
+
+Date: 2026-11-02. Status: accepted.

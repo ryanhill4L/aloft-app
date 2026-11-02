@@ -4,9 +4,12 @@
 .LSOverride
 
 # Xcode user state and build products.
-# The project file itself is not ignored: there is no project yet, and whether
-# a generator is used is undecided. If XcodeGen (or similar) is adopted, ignore
-# the generated project and keep every Info.plist key in the generator spec.
+# XcodeGen owns the project: ios/project.yml is the source, and every
+# Info.plist key and entitlement lives there. `make ios-project` regenerates.
+ios/Aloft.xcodeproj/
+ios/Aloft/Info.plist
+ios/Aloft/Aloft.entitlements
+ios/Config/Local.xcconfig
 DerivedData/
 build/
 .build/
@@ -30,6 +33,7 @@ xcuserdata/
 # Secrets and signing. Never commit.
 .env
 .env.*
+!.env.example
 *.pem
 *.p12
 *.mobileprovision

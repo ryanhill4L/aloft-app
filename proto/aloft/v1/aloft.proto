@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package aloft.v1;
+
+option go_package = "aloft/gen/aloft/v1;aloftv1";
+
+// The profile service. Health numbers never cross this API: the phone keeps
+// heart rate, HRV, sleep, and scores. The server holds who you are, who your
+// Crew is, the one-word weather you share with them, and the Lifts you send.
+service AloftService {
+  // Returns the caller's profile, creating an empty one on first call.
+  rpc GetMe(GetMeRequest) returns (GetMeResponse);
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+
+  // Creates a Crew with the caller in it, or returns the caller's Crew.
+  rpc CreateCrew(CreateCrewRequest) returns (CreateCrewResponse);
+  rpc JoinCrew(JoinCrewRequest) returns (JoinCrewResponse);
+  rpc GetCrew(GetCrewRequest) returns (GetCrewResponse);
+
+  // Shares today's weather word with the caller's Crew.
+  rpc SetWeather(SetWeatherRequest) returns (SetWeatherResponse);
+
+  rpc SendLift(SendLiftRequest) returns (SendLiftResponse);
+  rpc ListLifts(ListLiftsRequest) returns (ListLiftsResponse);
+}
+
+// Recovery bands as the Crew sees them. Clear 67-100, Fair 34-66, Overcast 0-33.
+enum Weather {
+  WEATHER_UNSPECIFIED = 0;
+  WEATHER_CLEAR = 1;
+  WEATHER_FAIR = 2;
+  WEATHER_OVERCAST = 3;
+}
+
+message Profile {
+  string user_id = 1;
+  string first_name = 2;
+  int32 birth_year = 3;
+  int32 height_cm = 4;
+  int32 weight_kg = 5;
+  // Minutes after midnight, local time.
+  int32 bedtime_minutes = 6;
+  int32 wake_minutes = 7;
+  bool onboarded = 8;
+}
+
+message GetMeRequest {}
+
+message GetMeResponse {
+  Profile profile = 1;
+}
+
+message UpdateProfileRequest {
+  Profile profile = 1;
+}
+
+message UpdateProfileResponse {
+  Profile profile = 1;
+}
+
+message CrewMember {
+  string user_id = 1;
+  string first_name = 2;
+  // Today's weather, or unspecified when the member has not shared yet.
+  Weather weather = 3;
+}
+
+message Crew {
+  string id = 1;
+  // Six characters, shared out of band to invite someone.
+  string code = 2;
+  repeated CrewMember members = 3;
+}
+
+message CreateCrewRequest {}
+
+message CreateCrewResponse {
+  Crew crew = 1;
+}
+
+message JoinCrewRequest {
+  string code = 1;
+}
+
+message JoinCrewResponse {
+  Crew crew = 1;
+}
+
+message GetCrewRequest {
+  // The caller's local calendar day, YYYY-MM-DD. Members' weather is for it.
+  string day = 1;
+}
+
+message GetCrewResponse {
+  // Absent when the caller has no Crew yet.
+  Crew crew = 1;
+}
+
+message SetWeatherRequest {
+  // Local calendar day, YYYY-MM-DD.
+  string day = 1;
+  Weather weather = 2;
+}
+
+message SetWeatherResponse {}
+
+message Lift {
+  string id = 1;
+  string from_user_id = 2;
+  string from_first_name = 3;
+  string message = 4;
+  int64 sent_at_unix = 5;
+}
+
+message SendLiftRequest {
+  string to_user_id = 1;
+  string message = 2;
+}
+
+message SendLiftResponse {
+  Lift lift = 1;
+}
+
+message ListLiftsRequest {
+  int32 limit = 1;
+}
+
+message ListLiftsResponse {
+  repeated Lift lifts = 1;
+}

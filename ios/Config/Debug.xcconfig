@@ -1,0 +1,8 @@
+#include "Base.xcconfig"
+
+// Local Go API (make dev-backend) and the Neon "dev" branch's Better Auth.
+// The auth URL is a public endpoint, not a secret.
+ALOFT_API_URL = http:/$()/localhost:9090
+NEON_AUTH_URL = https:/$()/ep-soft-meadow-bcsfu8ft.neonauth.c-16.us-east-1.aws.neon.tech/neondb/auth
+
+#include? "Local.xcconfig"

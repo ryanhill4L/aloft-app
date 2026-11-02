@@ -85,7 +85,7 @@ Rewrite these as one small Swift package plus a thin app. Behavior to keep, stru
 
 | Piece | Why |
 |---|---|
-| `backend/` and `Packages/NoopShare` on the fork | Friends accounts and day summaries. Aloft has no server |
+| `backend/` and `Packages/NoopShare` on the fork | Friends accounts and day summaries. Aloft has its own smaller backend (decision 5); port nothing from this one |
 | `android/`, `NOOPWatch/`, `StrandiOSWidgets/`, menu bar | Other platforms and surfaces |
 | `OuraProtocol`, `PolarProtocol`, Garmin/Huami/Xiaomi importers | Other devices |
 | `StrandDesign` Liquid Metal, Charge/Effort/Rest naming, the onboarding figure photo | Different visual language. See [design.md](design.md) |

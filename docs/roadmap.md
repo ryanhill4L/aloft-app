@@ -15,7 +15,15 @@ One Swift package plus an iOS app shell.
 - Debug screen only: connection state, last sync, last error, row counts, recent log lines, copy and share. Nothing uploaded.
 - Package tests for framing and for the durability case. Simulator screenshots of the debug screen on iPhone Duo and on a normal iPhone. BLE proof is the physical phone, stated in the PR.
 
-Out of this milestone: Today UI, scores, HealthKit, accounts, any network.
+Out of this milestone: scores, any network in the strap path.
+
+Status (2026-11-02): package, store, durability tests, and the debug view (the Log tab) exist. Not yet proven: pair, bond, and sync on a physical iPhone with Ryan's strap.
+
+## 1b — Profile, Crew, and the designed screens
+
+Added by decision 5 and 7. Email or Apple sign-in through Neon Auth, onboarding (name, basics, band, Health, Crew, nights), and Home with Sky, Crew, Log, and You tabs. The Go API holds profile, Crew, weather words, and Lifts.
+
+Status (2026-11-02): built and screenshot-checked on the iPhone Duo simulator (closed, plus offscreen renders at the open sizes) and an iPhone 17 Pro in portrait and landscape. Backend tests run against the Neon `dev` branch. Not yet proven: a full sign-in with a real inbox, Apple sign-in (needs the real bundle and team id), and folding the Duo simulator live.
 
 ## 2 — Today
 
@@ -31,4 +39,6 @@ Only after Today is in daily use. Candidates, not commitments:
 - HealthKit write, opt-in, on device.
 - Sleep detail, then whatever Ryan asks for next.
 
-Still out: cloud, friends sharing, watch app, widgets, Android, coach, firmware tools.
+- Sync health chunks to the backend (decision 5 says this needs its own entry first).
+
+Still out: watch app, widgets, Android, coach, firmware tools.
