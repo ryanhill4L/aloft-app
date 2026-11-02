@@ -1,0 +1,57 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode user state and build products.
+# The project file itself is not ignored: there is no project yet, and whether
+# a generator is used is undecided. If XcodeGen (or similar) is adopted, ignore
+# the generated project and keep every Info.plist key in the generator spec.
+DerivedData/
+build/
+.build/
+.swiftpm/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+**/xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.app
+*.xcarchive
+
+# Swift Package Manager build dir (the resolved pin is fine to commit)
+**/.build/
+.swiftpm/config/registries.json
+
+# Secrets and signing. Never commit.
+.env
+.env.*
+*.pem
+*.p12
+*.mobileprovision
+*.provisionprofile
+Secrets/
+*.keystore
+*.jks
+
+# Personal data. This repo is public.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+export.xml
+export.zip
+health-exports/
+Photos/
+Captures/
+*.heic
+
+# Editor
+.idea/
+*.iml
