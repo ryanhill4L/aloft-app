@@ -21,6 +21,7 @@ enum Preview {
         case "name": model.route = .onboarding(.name)
         case "basics": model.route = .onboarding(.basics)
         case "band": model.route = .onboarding(.band)
+        case "bandcheck": model.route = .bandCheck
         case "health": model.route = .onboarding(.health)
         case "crew":
             model.crew = nil

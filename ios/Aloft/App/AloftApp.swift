@@ -40,6 +40,8 @@ struct RootView: View {
                     OnboardingView(step: step)
                 case .home:
                     HomeView()
+                case .bandCheck:
+                    BandCheckView()
                 }
             }
             .animation(.smooth(duration: 0.25), value: model.route)
