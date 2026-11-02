@@ -11,6 +11,8 @@ enum Route: Hashable {
     case verify(email: String, mode: EntryMode)
     case onboarding(OnboardingStep)
     case home
+    /// The strap debug screen, reachable without an account.
+    case bandCheck
 }
 
 enum OnboardingStep: Int, CaseIterable, Hashable {
@@ -92,7 +94,10 @@ final class AppModel {
     init() {
         auth = NeonAuth(baseURL: AppConfig.neonAuthURL, origin: AppConfig.neonAuthOrigin)
         api = AloftAPI(baseURL: AppConfig.apiURL, auth: auth)
-        strap = StrapLink(store: try? StrapStore(url: Self.storeURL))
+        strap = StrapLink(
+            store: try? StrapStore(url: Self.storeURL),
+            trace: StrapTrace(directory: Self.storeURL.deletingLastPathComponent())
+        )
         isPreview = AppConfig.previewScreen != nil
     }
 

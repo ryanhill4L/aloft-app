@@ -54,6 +54,9 @@ targets:
       path: Aloft/Info.plist
       properties:
         CFBundleDisplayName: Aloft
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
           UIColorName: ""
         UIApplicationSupportsIndirectInputEvents: true
@@ -66,6 +69,7 @@ targets:
           - bluetooth-central
         NSBluetoothAlwaysUsageDescription: Aloft talks to your WHOOP strap over Bluetooth to sync your history to this phone.
         NSHealthShareUsageDescription: Aloft reads your sleep, heart rate, and heart rate variability to show your sky. It stays on this phone.
+        NSHealthUpdateUsageDescription: Aloft only reads from Apple Health. It does not write anything to it.
         UIAppFonts:
           - HostGrotesk-Variable.ttf
           - IBMPlexMono-Light.ttf
