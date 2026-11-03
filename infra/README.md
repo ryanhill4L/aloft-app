@@ -68,12 +68,24 @@ gcloud run services update aloft-api --region us-east4 --update-labels rotated=$
 
 1. Read the URL with `terraform output url`.
 2. Check the service: `curl <url>/health` prints `ok`. (Cloud Run reserves paths ending in `z`, so `/healthz` would never reach the API.)
-3. Put the URL in `ios/Config/Local.xcconfig` as `ALOFT_API_URL` for Release builds. Debug builds read that file too, so scope the line, and write `https:/$()/` in place of `https://` as the other xcconfig files do:
+3. Put the URL in `ios/Config/Local.xcconfig` for Release builds, twice: as the API, and as the `Origin` Neon Auth checks (it must also be a trusted domain on `main`, see below). Debug builds read that file too, so scope the lines, and write `https:/$()/` in place of `https://` as the other xcconfig files do:
 
    ```
    ALOFT_API_URL[config=Release] = https:/$()/aloft-api-xxxx.us-east4.run.app
+   NEON_AUTH_ORIGIN[config=Release] = https:/$()/aloft-api-xxxx.us-east4.run.app
+   ```
+
+4. Confirm Xcode picked them up before archiving. Release should show the Cloud Run URL for both and `main`'s auth URL; Debug should still show `localhost` and the `dev` branch:
+
+   ```sh
+   xcodebuild -project ios/Aloft.xcodeproj -scheme Aloft -configuration Release -showBuildSettings | grep -E ' (ALOFT_API_URL|NEON_AUTH_ORIGIN|NEON_AUTH_URL) = '
    ```
 
 ## Not managed here
 
-Neon itself and the Neon Auth settings (the Apple provider, the SMTP sender, the trusted origin) are set in the Neon console. See decision 9 in [docs/decisions.md](../docs/decisions.md).
+Neon itself and the Neon Auth settings live in the Neon console, on the `main` branch's Settings, Auth page. See decision 9 in [docs/decisions.md](../docs/decisions.md). The app depends on these:
+
+- **Trusted domain.** The Cloud Run URL. Release builds send it as `Origin` (`NEON_AUTH_ORIGIN[config=Release]` in `ios/Config/Local.xcconfig`), so "Allow Localhost" can be turned off once no build in testers' hands still sends `http://localhost`.
+- **Apple provider.** The client id is the app's bundle id, not a Services ID. The app sends Apple's identity token directly, and Better Auth checks its audience against the client id. The `.p8` key, Key ID, and Team ID come from Apple Developer and are entered in the console only.
+- **Email provider.** Custom SMTP for production. The shared `auth@mail.myneon.app` sender is rate-limited.
+- **Application name.** `Aloft`, shown in auth emails.
