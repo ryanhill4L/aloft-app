@@ -79,11 +79,28 @@ targets:
         AloftAPIURL: $(ALOFT_API_URL)
         NeonAuthURL: $(NEON_AUTH_URL)
         NeonAuthOrigin: $(NEON_AUTH_ORIGIN)
+  AloftTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - AloftTests
+    dependencies:
+      - target: Aloft
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: invalid.aloft.local.tests
+        SWIFT_VERSION: "6.0"
 schemes:
   Aloft:
     build:
       targets:
         Aloft: all
+        AloftTests: [test]
+    test:
+      config: Debug
+      targets:
+        - AloftTests
     run:
       config: Debug
     archive:
