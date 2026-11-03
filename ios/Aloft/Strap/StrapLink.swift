@@ -31,6 +31,17 @@ final class StrapLink: NSObject {
     private(set) var lastSync: Date?
     private(set) var lastError: String?
     private(set) var log: [String] = []
+    /// Type-36 replies since this connection, newest last. The Log tab prints
+    /// the result code from each one.
+    private(set) var commandResults: [CommandResponse] = []
+    /// The latest GET_ALARM_TIME reply, decoded by the Log tab.
+    private(set) var alarmReadback: CommandResponse?
+    /// Wrist, alarm, and haptic events from the `event` table, newest last.
+    private(set) var strapEvents: [StrapEvent] = []
+    /// Last strap-vs-phone clock line. Arming writes one even when the strap clock is unread.
+    private(set) var clockNote: String?
+    /// Strap unix seconds from a GET_CLOCK body, when that body is a wall clock.
+    private var strapClockUnix: UInt32?
 
     let store: StrapStore?
     let trace: StrapTrace
@@ -57,6 +68,7 @@ final class StrapLink: NSObject {
         super.init()
         if store == nil { note("store unavailable; history will not be acked") }
         Task { [weak self] in
+            await self?.reloadEvents()
             for await bytes in stream { await self?.handle(bytes) }
         }
     }
@@ -103,6 +115,89 @@ final class StrapLink: NSObject {
         state = .idle
     }
 
+    /// 5/MG command 19. WHOOP 4 uses command 79. Each builder exists only on
+    /// that generation's encoder.
+    func buzz() {
+        switch family {
+        case .whoop5:
+            note("buzz")
+            write(whoop5Encoder.buzz())
+        case .whoop4:
+            note("haptics")
+            write(whoop4Encoder.runHaptics())
+        }
+    }
+
+    /// Slot 1, two minutes from the phone clock. Logs the strap clock first
+    /// when a GET_CLOCK reply has already been read.
+    func armInTwoMinutes() {
+        let phone = UInt32(Date.now.timeIntervalSince1970)
+        if let strap = strapClockUnix {
+            let line = "clock before arm: strap \(strap) phone \(phone) delta \(Int64(phone) - Int64(strap))s"
+            clockNote = line
+            note(line)
+        } else {
+            let line = "clock before arm: phone \(phone); strap clock not read"
+            clockNote = line
+            note(line)
+        }
+        let when = phone &+ 120
+        switch family {
+        case .whoop5:
+            guard let slot = Whoop5Generation.AlarmSlot(rawValue: 1) else { return }
+            note("arm slot \(slot.rawValue) at \(when)")
+            write(whoop5Encoder.setAlarm(slot: slot, unixSeconds: when))
+        case .whoop4:
+            note("arm at \(when)")
+            write(whoop4Encoder.setAlarm(unixSeconds: when))
+        }
+    }
+
+    /// GET_ALARM_TIME. 5/MG reads slot 1. The reply lands in `alarmReadback`.
+    func readAlarm() {
+        switch family {
+        case .whoop5:
+            guard let slot = Whoop5Generation.AlarmSlot(rawValue: 1) else { return }
+            note("read alarm slot \(slot.rawValue)")
+            write(whoop5Encoder.getAlarm(slot: slot))
+        case .whoop4:
+            note("read alarm")
+            write(whoop4Encoder.getAlarm())
+        }
+    }
+
+    /// 5/MG `02 FF` clears every slot. WHOOP 4 has one alarm, body `01`.
+    func disarmAll() {
+        switch family {
+        case .whoop5:
+            note("disarm all slots")
+            write(whoop5Encoder.disableAllAlarms())
+        case .whoop4:
+            note("disarm")
+            write(whoop4Encoder.disableAlarm())
+        }
+    }
+
+    func reloadEvents() async {
+        guard let store else { return }
+        strapEvents = Self.visibleEvents((try? await store.events()) ?? [])
+    }
+
+    func commandTitle(_ command: UInt8) -> String {
+        if family == .whoop5, command == StrapCommand.Whoop5.buzz.rawValue { return "buzz" }
+        if family == .whoop4, command == StrapCommand.Whoop4.runHapticsPattern.rawValue { return "haptics" }
+        switch StrapCommand(rawValue: command) {
+        case .setAlarmTime: return "set alarm"
+        case .getAlarmTime: return "get alarm"
+        case .runAlarm: return "run alarm"
+        case .disableAlarm: return "disarm"
+        case .stopHaptics: return "stop haptics"
+        case .getClock: return "get clock"
+        case .setClock: return "set clock"
+        default: return "cmd \(command)"
+        }
+    }
+
     private func note(_ line: String, bytes: [UInt8]? = nil) {
         trace.write(line, bytes: bytes)
         let stamp = Date.now.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute().second())
@@ -145,10 +240,15 @@ final class StrapLink: NSObject {
                 note("frame dropped: bad CRC", bytes: raw)
                 continue
             }
-            note("frame \(frame.type) \(raw.count)B")
+            if let type = frame.type {
+                note("frame \(type) \(raw.count)B")
+            } else {
+                note("frame type \(frame.rawType) \(raw.count)B")
+            }
             if frame.type == .commandResponse {
                 if let response = frame.commandResponse {
-                    note("response cmd \(response.command) origin \(response.originSequence) result \(response.resultName)")
+                    note("response cmd \(response.command) origin \(response.originSequence) result \(response.result) \(response.resultName)")
+                    remember(response)
                 } else {
                     note("response undecoded")
                 }
@@ -158,8 +258,14 @@ final class StrapLink: NSObject {
                 if let event = frame.strapEvent {
                     note("event \(event.label) ts \(event.unixSeconds)")
                     if let store {
-                        do { try await store.insert([event]) }
-                        catch { note("event not stored: \(String(describing: error))") }
+                        do {
+                            try await store.insert([event])
+                            strapEvents = Self.visibleEvents(try await store.events())
+                        } catch {
+                            note("event not stored: \(String(describing: error))")
+                        }
+                    } else if Self.shows(event) {
+                        strapEvents.append(event)
                     }
                 } else {
                     note("event undecoded")
@@ -183,6 +289,48 @@ final class StrapLink: NSObject {
                 break
             }
         }
+    }
+
+    /// Wrist on/off, alarm set/fired, haptics fired. Other ids stay in the table.
+    private static let shownEventIDs: Set<UInt8> = [9, 10, 56, 57, 58, 60, 100]
+
+    private static func shows(_ event: StrapEvent) -> Bool { shownEventIDs.contains(event.id) }
+
+    private static func visibleEvents(_ events: [StrapEvent]) -> [StrapEvent] {
+        Array(events.filter(shows).suffix(40))
+    }
+
+    private func remember(_ response: CommandResponse) {
+        commandResults.append(response)
+        if commandResults.count > 20 { commandResults.removeFirst(commandResults.count - 20) }
+        if response.command == StrapCommand.getAlarmTime.rawValue { alarmReadback = response }
+        if response.command == StrapCommand.getClock.rawValue { noteClock(response) }
+    }
+
+    /// GET_CLOCK (11). WHOOP 4 puts unix seconds at the start of the body
+    /// (NOOP PostHooks, ryanbr/noop@2a1de760). A 5/MG body that is not a wall
+    /// clock is logged and not stored.
+    private func noteClock(_ response: CommandResponse) {
+        let phone = UInt32(Date.now.timeIntervalSince1970)
+        guard response.body.count >= 4 else {
+            let line = "strap clock unread: GET_CLOCK result \(response.result) \(response.resultName)"
+            clockNote = line
+            note(line)
+            return
+        }
+        let b = response.body
+        let unix = UInt32(b[0]) | (UInt32(b[1]) << 8) | (UInt32(b[2]) << 16) | (UInt32(b[3]) << 24)
+        let delta = Int64(phone) - Int64(unix)
+        guard (1_500_000_000...2_200_000_000).contains(unix) else {
+            let line = "strap clock \(unix) phone \(phone) delta \(delta)s; not a wall clock"
+            clockNote = line
+            note(line)
+            return
+        }
+        strapClockUnix = unix
+        let line = "strap clock \(unix) phone \(phone) delta \(delta)s"
+        clockNote = line
+        note(line)
     }
 
     private static func short(_ uuid: CBUUID) -> String { String(uuid.uuidString.prefix(8)) }

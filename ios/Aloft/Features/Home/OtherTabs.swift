@@ -117,6 +117,7 @@ struct LogTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
                 Stamp("0.3 Log · strap")
+                alarmSection(strap)
                 Card {
                     VStack(spacing: 0) {
                         row("Link", stateText(strap.state))
@@ -151,7 +152,86 @@ struct LogTab: View {
             .padding(.horizontal, split == .single ? Space.s5 : 40)
             .padding(.vertical, Space.s5)
         }
-        .task(id: strap.lastSync) { counts = try? await strap.store?.counts() }
+        .task(id: strap.lastSync) {
+            counts = try? await strap.store?.counts()
+            await strap.reloadEvents()
+        }
+    }
+
+    /// Buzz, arm, read, and disarm. Frames go out through `StrapLink`. The
+    /// Simulator has no CoreBluetooth path, so these buttons need a phone.
+    private func alarmSection(_ strap: StrapLink) -> some View {
+        VStack(alignment: .leading, spacing: Space.s3) {
+            Stamp("Strap alarm")
+            Text("A result code means the strap accepted the bytes, not that it buzzed. These buttons need a phone; the Simulator cannot reach a strap.")
+                .textStyle(.small)
+                .foregroundStyle(Palette.inkMuted)
+            HStack(spacing: Space.s3) {
+                Button("Buzz") { strap.buzz() }.buttonStyle(.ghost)
+                Button("Arm in +2 min") { strap.armInTwoMinutes() }.buttonStyle(.ghost)
+            }
+            HStack(spacing: Space.s3) {
+                Button("Read alarm") { strap.readAlarm() }.buttonStyle(.ghost)
+                Button("Disarm") { strap.disarmAll() }.buttonStyle(.ghost)
+            }
+            if let clock = strap.clockNote {
+                mono(clock)
+            }
+            if let read = strap.alarmReadback {
+                mono(alarmText(read))
+            } else {
+                Text("No alarm read yet.").textStyle(.small).foregroundStyle(Palette.inkMuted)
+            }
+            Stamp("Command results")
+            if strap.commandResults.isEmpty {
+                Text("No command result yet.").textStyle(.small).foregroundStyle(Palette.inkMuted)
+            }
+            ForEach(Array(strap.commandResults.suffix(12).enumerated()), id: \.offset) { _, response in
+                mono("\(strap.commandTitle(response.command)) · \(response.result) \(response.resultName)")
+            }
+            Stamp("Strap events")
+            if strap.strapEvents.isEmpty {
+                Text("No strap events yet. Alarm set, alarm fired, haptics, and wrist on or off show up here.")
+                    .textStyle(.small)
+                    .foregroundStyle(Palette.inkMuted)
+            }
+            ForEach(Array(strap.strapEvents.suffix(12).enumerated()), id: \.offset) { _, event in
+                mono("\(event.label) · \(event.id) · \(event.unixSeconds)")
+            }
+        }
+    }
+
+    private func mono(_ line: String) -> some View {
+        Text(line)
+            .font(.custom("IBMPlexMono-Regular", size: 12))
+            .foregroundStyle(Palette.inkMuted)
+            .textSelection(.enabled)
+    }
+
+    /// 5/MG GET body is the 21-byte record (`04`, slot, epoch). WHOOP 4 starts
+    /// with `01` and the epoch.
+    private func alarmText(_ response: CommandResponse) -> String {
+        let head = "get alarm · cmd \(response.command) origin \(response.originSequence) result \(response.result) \(response.resultName)"
+        let body = response.body
+        if body.count >= 7, body[0] == 0x04 {
+            let epoch = u32le(body, 2)
+            return "\(head)\nslot \(body[1]) epoch \(epoch) \(clock(epoch))"
+        }
+        if body.count >= 5, body[0] == 0x01 {
+            let epoch = u32le(body, 1)
+            return "\(head)\nepoch \(epoch) \(clock(epoch))"
+        }
+        guard !body.isEmpty else { return head }
+        let hex = body.map { String(format: "%02x", $0) }.joined()
+        return "\(head)\nbody \(hex)"
+    }
+
+    private func u32le(_ bytes: [UInt8], _ at: Int) -> UInt32 {
+        UInt32(bytes[at]) | (UInt32(bytes[at + 1]) << 8) | (UInt32(bytes[at + 2]) << 16) | (UInt32(bytes[at + 3]) << 24)
+    }
+
+    private func clock(_ epoch: UInt32) -> String {
+        Date(timeIntervalSince1970: TimeInterval(epoch)).formatted(date: .abbreviated, time: .standard)
     }
 
     private func row(_ label: String, _ value: String, last: Bool = false) -> some View {
@@ -182,6 +262,12 @@ struct LogTab: View {
         var lines = ["Aloft strap log", "state: \(stateText(strap.state))"]
         if let counts { lines.append("hr: \(counts.heartRate), rr: \(counts.rr)") }
         if let error = strap.lastError { lines.append("last error: \(error)") }
+        if let clock = strap.clockNote { lines.append(clock) }
+        if let read = strap.alarmReadback { lines.append(alarmText(read).replacingOccurrences(of: "\n", with: " ")) }
+        lines += strap.commandResults.suffix(8).map {
+            "\($0.command) \(strap.commandTitle($0.command)): \($0.result) \($0.resultName)"
+        }
+        lines += strap.strapEvents.suffix(8).map { "\($0.label) \($0.id) \($0.unixSeconds)" }
         return (lines + strap.log.suffix(80)).joined(separator: "\n")
     }
 }
