@@ -1,7 +1,7 @@
 #include "Base.xcconfig"
 
-// Set the deployed API and the Neon main branch's auth URL in Local.xcconfig
-// before archiving. There is no production deployment yet.
+// The API runs on Cloud Run (infra/). Set its URL as ALOFT_API_URL and
+// NEON_AUTH_ORIGIN in Local.xcconfig before archiving; see infra/README.md.
 ALOFT_API_URL =
 NEON_AUTH_URL = https:/$()/ep-dawn-butterfly-bc6rgbec.neonauth.c-16.us-east-1.aws.neon.tech/neondb/auth
 

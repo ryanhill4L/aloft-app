@@ -68,10 +68,17 @@ gcloud run services update aloft-api --region us-east4 --update-labels rotated=$
 
 1. Read the URL with `terraform output url`.
 2. Check the service: `curl <url>/health` prints `ok`. (Cloud Run reserves paths ending in `z`, so `/healthz` would never reach the API.)
-3. Put the URL in `ios/Config/Local.xcconfig` as `ALOFT_API_URL` for Release builds. Debug builds read that file too, so scope the line, and write `https:/$()/` in place of `https://` as the other xcconfig files do:
+3. Put the URL in `ios/Config/Local.xcconfig` for Release builds, twice: as the API, and as the `Origin` Neon Auth checks (it must also be a trusted domain on `main`, see below). Debug builds read that file too, so scope the lines, and write `https:/$()/` in place of `https://` as the other xcconfig files do:
 
    ```
    ALOFT_API_URL[config=Release] = https:/$()/aloft-api-xxxx.us-east4.run.app
+   NEON_AUTH_ORIGIN[config=Release] = https:/$()/aloft-api-xxxx.us-east4.run.app
+   ```
+
+4. Confirm Xcode picked them up before archiving. Release should show the Cloud Run URL for both and `main`'s auth URL; Debug should still show `localhost` and the `dev` branch:
+
+   ```sh
+   xcodebuild -project ios/Aloft.xcodeproj -scheme Aloft -configuration Release -showBuildSettings | grep -E ' (ALOFT_API_URL|NEON_AUTH_ORIGIN|NEON_AUTH_URL) = '
    ```
 
 ## Not managed here
