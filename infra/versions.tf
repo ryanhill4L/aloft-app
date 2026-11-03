@@ -11,10 +11,6 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 8.0"
     }
-    docker = {
-      source  = "kreuzwerker/docker"
-      version = "~> 3.9"
-    }
   }
 }
 
@@ -24,11 +20,3 @@ provider "google" {
 }
 
 data "google_client_config" "current" {}
-
-provider "docker" {
-  registry_auth {
-    address  = local.registry
-    username = "oauth2accesstoken"
-    password = data.google_client_config.current.access_token
-  }
-}

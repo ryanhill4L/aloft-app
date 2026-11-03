@@ -51,18 +51,15 @@ test-backend-db:
 # Infra (Cloud Run, see infra/README.md)
 # ---------------------------------------------------------------------------
 
-# The Docker provider needs the socket of the active context (Docker Desktop's is not /var/run).
-INFRA_ENV := DOCKER_HOST="$$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
-
 infra-init:
 	@cd infra && terraform init -backend-config=backend.hcl
 
 infra-plan:
-	@cd infra && $(INFRA_ENV) terraform plan
+	@cd infra && terraform plan
 
 infra-up:
 	@echo "$(BLUE)[infra]$(RESET) deploying to Cloud Run"
-	@cd infra && $(INFRA_ENV) terraform apply
+	@cd infra && terraform apply
 
 # ---------------------------------------------------------------------------
 # iOS

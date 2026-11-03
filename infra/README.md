@@ -7,7 +7,7 @@ You put the database URL into Secret Manager yourself with `gcloud`. Terraform o
 ## Set up
 
 1. Install Terraform 1.10 or later (`brew install hashicorp/tap/terraform`) and the Google Cloud CLI.
-2. Start Docker. The build runs on your machine and targets linux/amd64.
+2. Start Docker. `infra-up` runs `docker buildx build --push` on your machine for linux/amd64, after a `docker login` to Artifact Registry with a short-lived token.
 3. Create a GCP project with billing on. Then sign in (the CLI and the application default credentials Terraform uses are separate logins) and point both at it:
 
    ```sh

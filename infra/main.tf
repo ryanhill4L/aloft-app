@@ -18,20 +18,26 @@ resource "google_artifact_registry_repository" "aloft" {
   depends_on    = [google_project_service.apis]
 }
 
-resource "docker_image" "api" {
-  name = "${local.image}:latest"
-  build {
-    context  = local.backend
-    platform = "linux/amd64"
-  }
-  triggers = {
-    source = sha1(join("", [for f in sort(fileset(local.backend, "**")) : filesha1("${local.backend}/${f}") if f != ".env"]))
+# The docker CLI, not the kreuzwerker provider: its build hung on handing over the context.
+resource "terraform_data" "api_image" {
+  triggers_replace = [sha1(join("", [for f in sort(fileset(local.backend, "**")) : filesha1("${local.backend}/${f}") if f != ".env"]))]
+
+  provisioner "local-exec" {
+    working_dir = local.backend
+    environment = {
+      TOKEN    = data.google_client_config.current.access_token
+      REGISTRY = local.registry
+      IMAGE    = "${local.image}:latest"
+    }
+    command = "printf %s \"$TOKEN\" | docker login -u oauth2accesstoken --password-stdin \"$REGISTRY\" && docker buildx build --platform linux/amd64 --push -t \"$IMAGE\" ."
   }
 }
 
-resource "docker_registry_image" "api" {
-  name     = docker_image.api.name
-  triggers = { image = docker_image.api.image_id }
+data "google_artifact_registry_docker_image" "api" {
+  location      = var.region
+  repository_id = google_artifact_registry_repository.aloft.repository_id
+  image_name    = "api:latest"
+  depends_on    = [terraform_data.api_image]
 }
 
 # Created by hand with gcloud (see README.md), so the value never passes through Terraform.
@@ -67,7 +73,7 @@ resource "google_cloud_run_v2_service" "api" {
     }
 
     containers {
-      image = "${local.image}@${docker_registry_image.api.sha256_digest}"
+      image = data.google_artifact_registry_docker_image.api.self_link
       ports {
         container_port = 9090
       }
