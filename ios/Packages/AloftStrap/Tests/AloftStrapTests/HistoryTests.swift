@@ -93,6 +93,27 @@ import Testing
         #expect(session.stalled)
     }
 
+    @Test func eventFramesAreNotHistory() async throws {
+        var session = HistorySession()
+        let event = try Frame(family: .whoop5, bytes: Frame.encode(
+            .whoop5, type: 48, sequence: 1, command: 57, body: [0x00] + le32(1_780_916_150)
+        ))
+        #expect(session.receive(event, now: Self.now) == .ignored)
+        _ = session.receive(try Frame(family: .whoop5, bytes: Self.w5Record(unix: 1_780_916_150, hr: 102, rr: [602])), now: Self.now)
+        #expect(session.receive(event, now: Self.now) == .ignored)
+        guard case let .persist(batch, _, _) = session.receive(try Frame(family: .whoop5, bytes: Self.w5End), now: Self.now) else {
+            Issue.record("expected persist")
+            return
+        }
+        #expect(batch.heartRate.map(\.bpm) == [102])
+
+        let url = FileManager.default.temporaryDirectory.appending(path: "aloft-event-sync-\(UUID().uuidString)/\(StrapStore.fileName)")
+        let sync = HistorySync(family: .whoop5, store: try StrapStore(url: url))
+        let (outcome, ack) = await sync.receive(event, now: Self.now)
+        #expect(outcome == .ignored)
+        #expect(ack == nil)
+    }
+
     @Test func standardHeartRate() {
         let w4 = HeartRateMeasurement([0x16, 72, 0x00, 0x04], family: .whoop4)
         #expect(w4 == HeartRateMeasurement.init([0x16, 72, 0x00, 0x04], family: .whoop4))

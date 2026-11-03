@@ -39,7 +39,8 @@ final class StrapLink: NSObject {
     private var peripheral: CBPeripheral?
     private var family: StrapFamily = .whoop5
     private var reassembler = Reassembler(family: .whoop5)
-    private var encoder = CommandEncoder(family: .whoop5)
+    private var whoop4Encoder = CommandEncoder<Whoop4Generation>()
+    private var whoop5Encoder = CommandEncoder<Whoop5Generation>()
     private var history: HistorySync?
     private var commandCharacteristic: CBCharacteristic?
     private var peripherals: [UUID: CBPeripheral] = [:]
@@ -84,7 +85,10 @@ final class StrapLink: NSObject {
         central?.stopScan()
         family = strap.family
         reassembler = Reassembler(family: family)
-        encoder = CommandEncoder(family: family)
+        switch family {
+        case .whoop4: whoop4Encoder = CommandEncoder()
+        case .whoop5: whoop5Encoder = CommandEncoder()
+        }
         if let store { history = HistorySync(family: family, store: store) }
         peripheral = p
         p.delegate = self
@@ -121,6 +125,20 @@ final class StrapLink: NSObject {
         peripheral.writeValue(Data(bytes), for: commandCharacteristic, type: .withResponse)
     }
 
+    private func sharedFrame(_ command: StrapCommand, body: [UInt8] = [0x00]) -> [UInt8] {
+        switch family {
+        case .whoop4: return whoop4Encoder.frame(command, body: body)
+        case .whoop5: return whoop5Encoder.frame(command, body: body)
+        }
+    }
+
+    private func connectFrames(unixSeconds: UInt32) -> [[UInt8]] {
+        switch family {
+        case .whoop4: return whoop4Encoder.connectSequence(unixSeconds: unixSeconds)
+        case .whoop5: return whoop5Encoder.connectSequence(unixSeconds: unixSeconds)
+        }
+    }
+
     private func handle(_ bytes: [UInt8]) async {
         for raw in reassembler.append(bytes) {
             guard let frame = try? Frame(family: family, bytes: raw) else {
@@ -128,7 +146,27 @@ final class StrapLink: NSObject {
                 continue
             }
             note("frame \(frame.type) \(raw.count)B")
-            guard let history, [.historicalData, .metadata, .event, .consoleLogs].contains(frame.type) else { continue }
+            if frame.type == .commandResponse {
+                if let response = frame.commandResponse {
+                    note("response cmd \(response.command) origin \(response.originSequence) result \(response.resultName)")
+                } else {
+                    note("response undecoded")
+                }
+                continue
+            }
+            if frame.type == .event {
+                if let event = frame.strapEvent {
+                    note("event \(event.label) ts \(event.unixSeconds)")
+                    if let store {
+                        do { try await store.insert([event]) }
+                        catch { note("event not stored: \(String(describing: error))") }
+                    }
+                } else {
+                    note("event undecoded")
+                }
+                continue
+            }
+            guard let history, [.historicalData, .metadata, .consoleLogs].contains(frame.type) else { continue }
             let (outcome, ack) = await history.receive(frame, now: Int64(Date.now.timeIntervalSince1970))
             switch outcome {
             case let .ack(rows, trim):
@@ -240,7 +278,7 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
         guard service.uuid == CBUUID(string: gatt.service), commandCharacteristic != nil else { return }
         // The bond write. WHOOP 4: a battery read. 5/MG: the fixed client hello.
         note("bond write")
-        write(family == .whoop4 ? encoder.frame(.getBatteryLevel) : CommandEncoder.whoop5ClientHello)
+        write(family == .whoop4 ? sharedFrame(.getBatteryLevel) : CommandEncoder<Whoop5Generation>.clientHello)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
@@ -255,7 +293,7 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
         guard state == .bonding, let history else { return }
         state = .syncing
         note("bonded; sending connect sequence")
-        for frame in encoder.connectSequence(unixSeconds: UInt32(Date.now.timeIntervalSince1970)) { write(frame) }
+        for frame in connectFrames(unixSeconds: UInt32(Date.now.timeIntervalSince1970)) { write(frame) }
         Task {
             try? await Task.sleep(for: .seconds(1.5))
             note("history offload requested")

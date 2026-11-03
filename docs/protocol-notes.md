@@ -8,7 +8,7 @@ NOOP is not affiliated with WHOOP. Neither is Aloft.
 
 Version baselines NOOP states: WHOOP 4 centered on firmware **41.17.6.0**; WHOOP 5/MG contracts on **50.42.1.0** unless a paragraph names an older capture. WHOOP 4 and 5 do not share a frame layout. Do not shift offsets from one generation onto the other.
 
-Which generation Ryan's strap is: **open question**.
+Ryan's strap is a **WHOOP 5.0/MG** (2026-11-03). Firmware on that unit is still unconfirmed. Alarm and haptic frames are built for both generations; the 5/MG builders are the ones to send.
 
 ## Services and characteristics
 
@@ -141,11 +141,59 @@ WHOOP 5/MG uses the same command numbers on the puffin envelope. High-frequency 
 
 The fork's extra rule: `insert` must fold the WAL into `whoop.sqlite` before it returns, so the ack cannot race a checkpoint that never happened. See [noop-reference.md](noop-reference.md).
 
+## Alarms, haptics, and events
+
+5/MG is the path to prove. NOOP treats 5/MG alarm execution as experimental: one captured strap-driven wake, on firmware **50.41.1.0**. A command acknowledgement is not that wake ([`PROTOCOL_ALARMS.md`](https://github.com/ryanbr/noop/blob/2a1de7609843b095505274ad6fc811757210be80/docs/PROTOCOL_ALARMS.md#L7)). WHOOP 4's nine-byte SET is the confirmed frame (NOOP pull request 535) and stays buildable so it cannot be confused with the 5/MG record.
+
+Sources for the bodies: [`PROTOCOL_ALARMS.md`](https://github.com/ryanbr/noop/blob/2a1de7609843b095505274ad6fc811757210be80/docs/PROTOCOL_ALARMS.md), [`whoop_protocol.json`](https://github.com/ryanbr/noop/blob/2a1de7609843b095505274ad6fc811757210be80/Packages/WhoopProtocol/Sources/WhoopProtocol/Resources/whoop_protocol.json) `CommandNumber` and `EventNumber`, [`Commands.swift`](https://github.com/ryanbr/noop/blob/2a1de7609843b095505274ad6fc811757210be80/Strand/BLE/Commands.swift) `setAlarmPayload`, and the 5/MG golden in [`DeviceFamilyFramingTests.swift` line 349](https://github.com/ryanbr/noop/blob/2a1de7609843b095505274ad6fc811757210be80/Packages/WhoopProtocol/Tests/WhoopProtocolTests/DeviceFamilyFramingTests.swift#L349). The WHOOP 4 byte string is the 7:00 capture in the unlicensed [bWanShiTong README line 114](https://github.com/bWanShiTong/reverse-engineering-whoop-post/blob/master/README.md#L114); only those bytes are used.
+
+The strap stores a one-shot. It compares whole seconds about twice a second, emits event 57, and clears the slot. The app has to re-arm on the next connect. Event 58 is an app-triggered run. Event 56 is alarm set.
+
+| ID | Name | 5/MG body | WHOOP 4 body |
+|---:|---|---|---|
+| 66 | `SET_ALARM_TIME` | Rev 4, 21 bytes: `04 \|\| slot 1–6 \|\| epoch u32le \|\| fraction u16le` (1/32768 s) `\|\|` effects `2F 98` then six zeros `\|\|` loop `u16le` 0 `\|\|` repeats 7 `\|\|` duration 30 `\|\|` crescendo 0 | `01 \|\| epoch u32le \|\| 00 00 00 00` |
+| 67 | `GET_ALARM_TIME` | `04 \|\| slot`. The reply is that same record | `01` |
+| 68 | `RUN_ALARM` | `02 \|\| slot` | `01` |
+| 69 | `DISABLE_ALARM` | `02 \|\| slot`, or `02 FF` for all six | `01` |
+| 19 | 5/MG buzz | `01 2F 98` then six zeros, loop `00 00`, then `repeats − 1` (clamped to 0–7) | Do not send. On a WHOOP 4 this number is `SET_R7_REALTIME_STREAM` |
+| 79 | `RUN_HAPTICS_PATTERN` | Do not send. A 5/MG answers result 3 | `02 03 00 00 00` (preset 2, three loops) |
+| 122 | `STOP_HAPTICS` | `01` | `00` |
+
+Command 19 exists only on the 5/MG encoder. Command 79 exists only on the WHOOP 4 encoder. The shared command enum does not carry either number, so the wrong generation cannot name it.
+
+### Responses and events
+
+Type 36, from `COMMAND_RESPONSE` in `whoop_protocol.json` and [`FrameRouter.commandResultByte`](https://github.com/ryanbr/noop/blob/2a1de7609843b095505274ad6fc811757210be80/Strand/BLE/FrameRouter.swift): the four bytes at **5/MG offsets 10–13** (WHOOP 4 offsets 6–9) are the command, the request's sequence, the result, and the first body byte. Result codes: 0 failure, 1 success, 2 pending, 3 unsupported. Anything else stays the raw number. Success means the strap accepted the bytes, not that the motor moved. Hello replies carry key material; log the result, not the body.
+
+Type 48, from the `EVENT` fields in `whoop_protocol.json` (id at offset 6, timestamp `u32le` at offset 8; add four on 5/MG):
+
+| ID | Name |
+|---:|---|
+| 9 | wrist on |
+| 10 | wrist off |
+| 14 | double tap |
+| 56 | alarm set |
+| 57 | alarm fired |
+| 58 | alarm fired by app |
+| 60, 100 | haptics fired (60 is `HAPTICS_FIRED`, 100 is `HAPTICS_TERMINATED`; the raw id is kept) |
+
+Any other id is stored as its number. Event frames are not history records. They are written to the on-device `event` table, and that insert folds the WAL before it returns, same as `heart_rate`.
+
+### Device checks
+
+Not run yet. A phone and Ryan's 5.0/MG have to answer these:
+
+- Firmware on this unit. The captured 5/MG wake was 50.41.1.0; this strap may differ.
+- Whether a strap-stored alarm fires with the phone away.
+- Whether it fires only while the strap treats the wearer as asleep.
+- Slot behaviour: which of 1–6 holds the alarm, whether `02 FF` clears every slot, and whether two slots due together both fire.
+
 ## Open questions
 
-- Ryan's strap generation and firmware, and therefore which hello and which history offsets Aloft must prove on device.
+- Firmware on Ryan's 5.0/MG, and therefore which hello behaviour and which history offsets to confirm on that unit. The generation itself is a 5.0/MG.
 - Whether an unacknowledged `HISTORY_END` is retransmitted byte-for-byte, and what replay looks like after a disconnect. NOOP lists both as unknown for the WHOOP 4 baseline ([transport doc](https://github.com/ryanbr/noop/blob/2a1de7609843b095505274ad6fc811757210be80/docs/PROTOCOL_TRANSPORT.md#L110-L112)).
 - WHOOP 4 reboot frame. Opcode 29 with an empty body is confirmed on 5.0 firmware 50.40.1.0 and ignored by a 4.0 in NOOP's notes (`Commands.swift`). Not needed for milestone 1.
 - Command 96's wire value. NOOP's comment says an APK decompile disagrees by 11. Leave it unset.
 - Absolute ECG timing, SpO₂ calibration, and most physiological field meanings. Out of scope until a later milestone, and still unresolved in NOOP's protocol index.
 - Format 2 on WHOOP 5/MG is a separate contract in the transport doc. Milestone 1 should implement the format the strap actually emits and refuse the other, not guess.
+- The alarm device checks in the section above: phone-away firing, the asleep-only hypothesis, and 5/MG slot behaviour. 5/MG alarm support stays experimental until those are seen on Ryan's strap.

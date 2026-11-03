@@ -30,7 +30,7 @@ import Testing
     }
 
     @Test func clientHelloIsAValidFrame() throws {
-        let frame = try Frame(family: .whoop5, bytes: CommandEncoder.whoop5ClientHello)
+        let frame = try Frame(family: .whoop5, bytes: CommandEncoder<Whoop5Generation>.clientHello)
         #expect(frame.command == StrapCommand.getHello.rawValue)
     }
 
@@ -72,7 +72,7 @@ import Testing
     }
 
     @Test func connectSequenceSetsClockFirstOn5() throws {
-        var enc = CommandEncoder(family: .whoop5)
+        var enc = CommandEncoder<Whoop5Generation>()
         let frames = enc.connectSequence(unixSeconds: 1_780_000_000)
         let parsed = try frames.map { try Frame(family: .whoop5, bytes: $0) }
         #expect(parsed.map(\.command) == [StrapCommand.setClock.rawValue, StrapCommand.getClock.rawValue])

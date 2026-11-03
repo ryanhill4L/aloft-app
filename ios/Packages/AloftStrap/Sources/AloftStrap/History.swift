@@ -84,9 +84,13 @@ public struct HistorySession: Sendable {
         case complete
         /// Persist `batch`, then call `persisted` or `failed`.
         case persist(batch: SampleBatch, trim: UInt32, endData: [UInt8])
+        /// Not a history record. Event frames used to land in the open chunk
+        /// and disappear when the chunk was decoded.
+        case ignored
     }
 
     public mutating func receive(_ frame: Frame, now: Int64) -> Step {
+        if frame.type == .event { return .ignored }
         switch frame.historyMarker {
         case .start:
             chunk.removeAll()
@@ -126,32 +130,58 @@ public struct HistorySession: Sendable {
 /// Wires a session to the store: insert, fold, then and only then ack.
 public actor HistorySync {
     private var session = HistorySession()
-    private var encoder: CommandEncoder
+    private var outbound: Outbound
     private let store: StrapStore
 
     public init(family: StrapFamily, store: StrapStore) {
-        self.encoder = CommandEncoder(family: family)
+        self.outbound = Outbound(family: family)
         self.store = store
     }
 
-    public func startFrame() -> [UInt8] { encoder.startHistory() }
+    public func startFrame() -> [UInt8] { outbound.startHistory() }
 
     /// Returns the outcome and, for `.ack`, the frame to write.
     public func receive(_ frame: Frame, now: Int64) async -> (HistoryOutcome, [UInt8]?) {
         switch session.receive(frame, now: now) {
         case .none:
             return (.collected, nil)
+        case .ignored:
+            return (.ignored, nil)
         case .complete:
             return (.complete, nil)
         case let .persist(batch, trim, endData):
             if session.stalled { return (.stalled, nil) }
             do {
                 let written = try await store.insert(batch)
-                return (.ack(rowsWritten: written, trim: trim), encoder.ackHistory(endData: endData))
+                return (.ack(rowsWritten: written, trim: trim), outbound.ackHistory(endData: endData))
             } catch {
                 session.markFailed()
                 return (.stalled, nil)
             }
+        }
+    }
+}
+
+/// The shared-command encoder for whichever generation connected. Alarm and
+/// haptic commands are not sent from here.
+private struct Outbound: Sendable {
+    private var whoop4 = CommandEncoder<Whoop4Generation>()
+    private var whoop5 = CommandEncoder<Whoop5Generation>()
+    private let family: StrapFamily
+
+    init(family: StrapFamily) { self.family = family }
+
+    mutating func startHistory() -> [UInt8] {
+        switch family {
+        case .whoop4: return whoop4.startHistory()
+        case .whoop5: return whoop5.startHistory()
+        }
+    }
+
+    mutating func ackHistory(endData: [UInt8]) -> [UInt8] {
+        switch family {
+        case .whoop4: return whoop4.ackHistory(endData: endData)
+        case .whoop5: return whoop5.ackHistory(endData: endData)
         }
     }
 }
