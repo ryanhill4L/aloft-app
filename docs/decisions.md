@@ -54,10 +54,10 @@ Closes the open question in 2. The package is `AloftStrap` and talks to the syst
 
 Date: 2026-11-02. Status: accepted.
 
-## 9. The API runs on Cloud Run, managed by Pulumi
+## 9. The API runs on Cloud Run, managed by Terraform
 
-Ryan chose Google Cloud Run for the Go API and Pulumi (Go) to manage it. `infra/` enables the APIs, builds `backend/` for linux/amd64 into Artifact Registry, keeps the Neon `main` pooled connection string in Secret Manager, and runs one Cloud Run service in `us-east4`, the region closest to Neon's aws-us-east-1. Scaling is 0 to 1 instances because migrations run at start. Invoke is public; every RPC still needs a Neon Auth JWT. The stack config names the GCP project and holds the encrypted database URL, so it stays out of git.
+Ryan chose Google Cloud Run for the Go API and Terraform to manage it (Pulumi was tried first and dropped the same day). `infra/` enables the APIs, builds `backend/` for linux/amd64 into Artifact Registry, keeps the Neon `main` pooled connection string in Secret Manager, and runs one Cloud Run service in `us-east4`, the region closest to Neon's aws-us-east-1. Scaling is 0 to 1 instances because migrations run at start. Invoke is public; every RPC still needs a Neon Auth JWT. The database URL is write-only, so it never lands in Terraform state. State lives in a GCS bucket; `terraform.tfvars` and `backend.hcl` name the project and stay out of git.
 
-Neon stays outside Pulumi for now. The project already exists, and the community `kislerdm/neon` provider has no Neon Auth resource. Neon Auth settings (the Apple provider, SMTP, the trusted origin) are a separate step.
+Neon stays outside Terraform for now. The project already exists, and the community `kislerdm/neon` provider has no Neon Auth resource. Neon Auth settings (the Apple provider, SMTP, the trusted origin) are a separate step.
 
-Date: 2026-11-02. Status: accepted.
+Date: 2026-11-03. Status: accepted.

@@ -9,7 +9,7 @@ Aloft is a monorepo: a native SwiftUI app, a platform-pure strap package, and a 
 ```
 proto/aloft/v1/      API contract (source of truth). `make proto` regenerates Go and Swift
 backend/             Go Connect-RPC API on Neon Postgres; Neon Auth JWTs; goose migrations
-infra/               Pulumi (Go) program that deploys backend/ to Cloud Run. Stack config stays out of git
+infra/               Terraform that deploys backend/ to Cloud Run. tfvars and backend.hcl stay out of git
 ios/project.yml      XcodeGen spec. Every Info.plist key and entitlement lives here
 ios/Aloft/           SwiftUI app: Design/, Features/, Services/, Strap/ (CoreBluetooth edge), Gen/
 ios/Packages/AloftStrap/  framing, commands, history state, SQLite store. No SwiftUI, no CoreBluetooth

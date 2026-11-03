@@ -63,7 +63,8 @@ Captures/
 # Strap traces shared from a phone hold heart rate
 strap-trace*.log
 
-# Pulumi stack config names the GCP project and holds the encrypted database URL.
-# infra/infra is what `go build` leaves behind.
-infra/Pulumi.*.yaml
-infra/infra
+# Terraform: tfvars and backend.hcl name the GCP project and hold the database URL.
+infra/.terraform/
+infra/*.tfstate*
+infra/*.tfvars
+infra/backend.hcl

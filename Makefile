@@ -1,5 +1,5 @@
 .PHONY: help proto proto-lint dev-backend test test-backend test-backend-db test-strap \
-        ios-project build-ios run-ios sim shots infra-preview infra-up
+        ios-project build-ios run-ios sim shots infra-init infra-plan infra-up
 
 IOS_SIMULATOR ?= iPhone 17 Pro
 IOS_BUNDLE_ID ?= invalid.aloft.local
@@ -16,7 +16,8 @@ help:
 	@echo "dev-backend      run the Go API on :9090 (reads backend/.env)"
 	@echo "test             strap package tests + backend unit tests"
 	@echo "test-backend-db  backend store tests against ALOFT_TEST_DATABASE_URL"
-	@echo "infra-preview    show what pulumi up would change on Cloud Run (see infra/README.md)"
+	@echo "infra-init       set up Terraform against the state bucket (see infra/README.md)"
+	@echo "infra-plan       show what infra-up would change on Cloud Run"
 	@echo "infra-up         build, push, and deploy the API to Cloud Run"
 	@echo "ios-project      regenerate ios/Aloft.xcodeproj from ios/project.yml"
 	@echo "run-ios          build, install, and launch on IOS_SIMULATOR"
@@ -50,12 +51,18 @@ test-backend-db:
 # Infra (Cloud Run, see infra/README.md)
 # ---------------------------------------------------------------------------
 
-infra-preview:
-	@cd infra && pulumi preview
+# The Docker provider needs the socket of the active context (Docker Desktop's is not /var/run).
+INFRA_ENV := DOCKER_HOST="$$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
+
+infra-init:
+	@cd infra && terraform init -backend-config=backend.hcl
+
+infra-plan:
+	@cd infra && $(INFRA_ENV) terraform plan
 
 infra-up:
 	@echo "$(BLUE)[infra]$(RESET) deploying to Cloud Run"
-	@cd infra && pulumi up
+	@cd infra && $(INFRA_ENV) terraform apply
 
 # ---------------------------------------------------------------------------
 # iOS
