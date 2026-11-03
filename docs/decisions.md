@@ -56,7 +56,7 @@ Date: 2026-11-02. Status: accepted.
 
 ## 9. The API runs on Cloud Run, managed by Terraform
 
-Ryan chose Google Cloud Run for the Go API and Terraform to manage it (Pulumi was tried first and dropped the same day). `infra/` enables the APIs, builds `backend/` for linux/amd64 into Artifact Registry, keeps the Neon `main` pooled connection string in Secret Manager, and runs one Cloud Run service in `us-east4`, the region closest to Neon's aws-us-east-1. Scaling is 0 to 1 instances because migrations run at start. Invoke is public; every RPC still needs a Neon Auth JWT. The database URL is write-only, so it never lands in Terraform state. State lives in a GCS bucket; `terraform.tfvars` and `backend.hcl` name the project and stay out of git.
+Ryan chose Google Cloud Run for the Go API and Terraform to manage it (Pulumi was tried first and dropped the same day). `infra/` enables the APIs, builds `backend/` for linux/amd64 into Artifact Registry, keeps the Neon `main` pooled connection string in Secret Manager, and runs one Cloud Run service in `us-east4`, the region closest to Neon's aws-us-east-1. Scaling is 0 to 1 instances because migrations run at start. Invoke is public; every RPC still needs a Neon Auth JWT. Ryan stores the database URL in Secret Manager with `gcloud`; Terraform only names the secret and grants the API's service account access, so the URL is never in a file, in state, or in a plan. State lives in a GCS bucket; `terraform.tfvars` and `backend.hcl` name the project and stay out of git.
 
 Neon stays outside Terraform for now. The project already exists, and the community `kislerdm/neon` provider has no Neon Auth resource. Neon Auth settings (the Apple provider, SMTP, the trusted origin) are a separate step.
 

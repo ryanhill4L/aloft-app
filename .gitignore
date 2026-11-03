@@ -63,7 +63,7 @@ Captures/
 # Strap traces shared from a phone hold heart rate
 strap-trace*.log
 
-# Terraform: tfvars and backend.hcl name the GCP project and hold the database URL.
+# Terraform: tfvars and backend.hcl name the GCP project.
 infra/.terraform/
 infra/*.tfstate*
 infra/*.tfvars

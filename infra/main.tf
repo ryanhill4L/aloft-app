@@ -34,18 +34,9 @@ resource "docker_registry_image" "api" {
   triggers = { image = docker_image.api.image_id }
 }
 
-resource "google_secret_manager_secret" "database_url" {
+# Created by hand with gcloud (see README.md), so the value never passes through Terraform.
+data "google_secret_manager_secret" "database_url" {
   secret_id = "database-url"
-  replication {
-    auto {}
-  }
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_secret_manager_secret_version" "database_url" {
-  secret                 = google_secret_manager_secret.database_url.id
-  secret_data_wo         = var.database_url
-  secret_data_wo_version = var.database_url_version
 }
 
 resource "google_service_account" "api" {
@@ -55,7 +46,7 @@ resource "google_service_account" "api" {
 }
 
 resource "google_secret_manager_secret_iam_member" "api_database_url" {
-  secret_id = google_secret_manager_secret.database_url.secret_id
+  secret_id = data.google_secret_manager_secret.database_url.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = google_service_account.api.member
 }
@@ -92,7 +83,7 @@ resource "google_cloud_run_v2_service" "api" {
         name = "DATABASE_URL"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.database_url.secret_id
+            secret  = data.google_secret_manager_secret.database_url.secret_id
             version = "latest"
           }
         }
@@ -107,7 +98,6 @@ resource "google_cloud_run_v2_service" "api" {
 
   depends_on = [
     google_project_service.apis,
-    google_secret_manager_secret_version.database_url,
     google_secret_manager_secret_iam_member.api_database_url,
   ]
 }
