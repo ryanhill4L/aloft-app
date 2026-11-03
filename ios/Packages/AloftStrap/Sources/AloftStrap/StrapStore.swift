@@ -67,6 +67,11 @@ public actor StrapStore {
                 ms INTEGER NOT NULL,
                 PRIMARY KEY (ts_ms, ms)
             ) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS event (
+                ts INTEGER NOT NULL,
+                id INTEGER NOT NULL,
+                PRIMARY KEY (ts, id)
+            ) WITHOUT ROWID;
             """)
         Self.protect(url)
     }
@@ -93,6 +98,33 @@ public actor StrapStore {
         }
         try foldWAL()
         return written
+    }
+
+    /// Writes strap events and folds them into the main file before returning.
+    /// Same durability rule as `insert(_: SampleBatch)`.
+    @discardableResult
+    public func insert(_ events: [StrapEvent]) throws -> Int {
+        guard !events.isEmpty else { return 0 }
+        var written = 0
+        try db.transaction {
+            let row = try db.prepare("INSERT OR IGNORE INTO event (ts, id) VALUES (?, ?)")
+            for event in events {
+                row.bind([Int64(event.unixSeconds), Int64(event.id)])
+                try row.step()
+                written += 1
+            }
+        }
+        try foldWAL()
+        return written
+    }
+
+    public func events() throws -> [StrapEvent] {
+        let rows = try db.prepare("SELECT ts, id FROM event ORDER BY ts, id")
+        var out: [StrapEvent] = []
+        while try rows.step() {
+            out.append(StrapEvent(id: UInt8(rows.int(1)), unixSeconds: UInt32(rows.int(0))))
+        }
+        return out
     }
 
     public func counts() throws -> StoreCounts {

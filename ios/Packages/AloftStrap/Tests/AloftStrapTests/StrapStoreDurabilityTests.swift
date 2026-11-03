@@ -66,6 +66,38 @@ import Testing
         #expect(counts.latestHeartRateMs == 2_000)
     }
 
+    private func eventRows(in url: URL) throws -> Int {
+        let db = try SQLiteConnection(path: url.path)
+        let stmt = try db.prepare("SELECT COUNT(*) FROM event")
+        try stmt.step()
+        return stmt.int(0)
+    }
+
+    @Test func eventInsertIsInMainFileBeforeReturn() async throws {
+        let url = dir.appending(path: "events-\(UUID().uuidString)/\(StrapStore.fileName)")
+        let store = try StrapStore(url: url)
+        let event = StrapEvent(id: 57, unixSeconds: 1_700_000_000)
+        let written = try await store.insert([event])
+        #expect(written == 1)
+        #expect(try eventRows(in: mainFileOnlyCopy(of: url)) == 1)
+    }
+
+    @Test func eventsSurviveRelaunchWithSidecarsDeleted() async throws {
+        let url = dir.appending(path: "events-relaunch-\(UUID().uuidString)/\(StrapStore.fileName)")
+        let fired = StrapEvent(id: 57, unixSeconds: 1_700_000_000)
+        let haptics = StrapEvent(id: 60, unixSeconds: 1_700_000_000)
+        do {
+            let store = try StrapStore(url: url)
+            try await store.insert([fired, haptics])
+            try await store.insert([fired])
+        }
+        for sidecar in ["-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: url.path + sidecar)
+        }
+        let reopened = try StrapStore(url: url)
+        #expect(try await reopened.events() == [fired, haptics])
+    }
+
     @Test func duplicateSamplesAreIgnored() async throws {
         let store = try StrapStore(url: dir.appending(path: StrapStore.fileName))
         let batch = SampleBatch(heartRate: [HeartRateSample(timestampMs: 5, bpm: 70)])

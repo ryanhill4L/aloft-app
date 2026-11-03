@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(SQLite3)
 import SQLite3
+#else
+import CSQLite
+#endif
 
 /// A thin wrapper over the system SQLite C API. Only what `StrapStore` needs.
 final class SQLiteConnection {
