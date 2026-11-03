@@ -62,7 +62,7 @@ func run() error {
 	verifier := auth.JWTVerifier{Keyfunc: jwks.Keyfunc, Issuer: cfg.Issuer()}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	path, handler := aloftv1connect.NewAloftServiceHandler(
 		service.New(store.NewPostgres(db)),
 		connect.WithInterceptors(auth.NewInterceptor(verifier)),

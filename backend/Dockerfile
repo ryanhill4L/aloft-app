@@ -1,10 +1,12 @@
 # Release image. Migrations are embedded in the binary and run at start.
-FROM golang:1.25-alpine AS build
+# Cross-compile on the build machine's platform instead of emulating the target.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/aloft-api .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w" -o /out/aloft-api .
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata

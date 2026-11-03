@@ -1,5 +1,5 @@
 .PHONY: help proto proto-lint dev-backend test test-backend test-backend-db test-strap \
-        ios-project build-ios run-ios sim shots
+        ios-project build-ios run-ios sim shots infra-init infra-plan infra-up
 
 IOS_SIMULATOR ?= iPhone 17 Pro
 IOS_BUNDLE_ID ?= invalid.aloft.local
@@ -16,6 +16,9 @@ help:
 	@echo "dev-backend      run the Go API on :9090 (reads backend/.env)"
 	@echo "test             strap package tests + backend unit tests"
 	@echo "test-backend-db  backend store tests against ALOFT_TEST_DATABASE_URL"
+	@echo "infra-init       set up Terraform against the state bucket (see infra/README.md)"
+	@echo "infra-plan       show what infra-up would change on Cloud Run"
+	@echo "infra-up         build, push, and deploy the API to Cloud Run"
 	@echo "ios-project      regenerate ios/Aloft.xcodeproj from ios/project.yml"
 	@echo "run-ios          build, install, and launch on IOS_SIMULATOR"
 
@@ -43,6 +46,20 @@ test-backend:
 
 test-backend-db:
 	@cd backend && set -a && . ./.env && set +a && ALOFT_TEST_DATABASE_URL="$${ALOFT_TEST_DATABASE_URL:-$$DATABASE_URL}" go test -count=1 ./internal/store/
+
+# ---------------------------------------------------------------------------
+# Infra (Cloud Run, see infra/README.md)
+# ---------------------------------------------------------------------------
+
+infra-init:
+	@cd infra && terraform init -backend-config=backend.hcl
+
+infra-plan:
+	@cd infra && terraform plan
+
+infra-up:
+	@echo "$(BLUE)[infra]$(RESET) deploying to Cloud Run"
+	@cd infra && terraform apply
 
 # ---------------------------------------------------------------------------
 # iOS
