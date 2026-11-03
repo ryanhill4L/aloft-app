@@ -25,6 +25,8 @@ Added by decision 5 and 7. Email or Apple sign-in through Neon Auth, onboarding 
 
 Status (2026-11-02): built and screenshot-checked on the iPhone Duo simulator (closed, plus offscreen renders at the open sizes) and an iPhone 17 Pro in portrait and landscape. Backend tests run against the Neon `dev` branch. Not yet proven: a full sign-in with a real inbox, Apple sign-in (needs the real bundle and team id), and folding the Duo simulator live.
 
+Status (2026-11-03): the API runs on Cloud Run against Neon `main` (decision 9, `infra/`). Unauthenticated calls get 401 and `/health` returns ok. Neon Auth `main` trusts the Cloud Run origin and is named Aloft. Still open: the Apple provider and custom SMTP on `main`, a TestFlight build with the new Release settings, a real sign-in that saves a profile, and turning off "Allow Localhost" once no tester has the old build.
+
 ## 2 — Today
 
 A single screen in the spirit of the official WHOOP app: recovery, strain, and sleep, computed on device from the stored strap data. Adaptive layout (one column when narrow, two panes when wide). Same screenshot pair as milestone 1, plus a device check that the numbers came from a real sync rather than a fixture alone.
