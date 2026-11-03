@@ -35,13 +35,29 @@ extension EnvironmentValues {
 }
 
 /// Reads the window's size and publishes the split to every child.
+///
+/// The size ignores the keyboard. On an unfolded Duo in portrait the window is
+/// just wide enough to stack; the keyboard inset makes it look single-column,
+/// the field is rebuilt, and the keyboard never stays up.
 struct AdaptiveRoot<Content: View>: View {
     @ViewBuilder var content: Content
+    @State private var split = PaneSplit.single
 
     var body: some View {
-        GeometryReader { geo in
-            content.environment(\.paneSplit, PaneSplit(geo.size))
-        }
+        content
+            .environment(\.paneSplit, split)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                GeometryReader { geo in
+                    Color.clear
+                        .onChange(of: geo.size, initial: true) { _, size in
+                            guard size.width > 1, size.height > 1 else { return }
+                            let next = PaneSplit(size)
+                            if next != split { split = next }
+                        }
+                }
+                .ignoresSafeArea(.keyboard)
+            }
     }
 }
 
@@ -132,22 +148,20 @@ struct StepScreen<Trailing: View, Lead: View, Work: View>: View {
     }
 
     private var stacked: some View {
-        GeometryReader { geo in
-            VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: Space.s4) {
-                    topBar
-                    heading(display: true).padding(.top, Space.s3)
-                    lead
-                    Spacer(minLength: 0)
-                }
-                .frame(height: geo.size.height / 2 - 28)
-                Spacer().frame(height: 56)
-                VStack(alignment: .leading, spacing: Space.s4) {
-                    work
-                    action
-                }
-                .frame(maxHeight: .infinity)
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: Space.s4) {
+                topBar
+                heading(display: true).padding(.top, Space.s3)
+                lead
+                Spacer(minLength: 0)
             }
+            .frame(maxHeight: .infinity)
+            Spacer().frame(height: 56)
+            VStack(alignment: .leading, spacing: Space.s4) {
+                work
+                action
+            }
+            .frame(maxHeight: .infinity)
         }
         .padding(.horizontal, Space.s6)
         .padding(.vertical, Space.s3)
