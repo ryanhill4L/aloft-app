@@ -76,4 +76,9 @@ gcloud run services update aloft-api --region us-east4 --update-labels rotated=$
 
 ## Not managed here
 
-Neon itself and the Neon Auth settings (the Apple provider, the SMTP sender, the trusted origin) are set in the Neon console. See decision 9 in [docs/decisions.md](../docs/decisions.md).
+Neon itself and the Neon Auth settings live in the Neon console, on the `main` branch's Settings, Auth page. See decision 9 in [docs/decisions.md](../docs/decisions.md). The app depends on these:
+
+- **Trusted domain.** The Cloud Run URL. Release builds send it as `Origin` (`NEON_AUTH_ORIGIN[config=Release]` in `ios/Config/Local.xcconfig`), so "Allow Localhost" can be turned off once no build in testers' hands still sends `http://localhost`.
+- **Apple provider.** The client id is the app's bundle id, not a Services ID. The app sends Apple's identity token directly, and Better Auth checks its audience against the client id. The `.p8` key, Key ID, and Team ID come from Apple Developer and are entered in the console only.
+- **Email provider.** Custom SMTP for production. The shared `auth@mail.myneon.app` sender is rate-limited.
+- **Application name.** `Aloft`, shown in auth emails.
