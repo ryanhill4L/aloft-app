@@ -53,3 +53,11 @@ Date: 2026-11-02. Status: accepted.
 Closes the open question in 2. The package is `AloftStrap` and talks to the system SQLite C API directly instead of taking GRDB. `StrapStore.insert` folds the WAL (PASSIVE, then FULL if frames remain) before it returns; `HistorySync` acks only after that. Tests cover the main-file-only copy and a relaunch with `-wal`/`-shm` deleted.
 
 Date: 2026-11-02. Status: accepted.
+
+## 9. The API runs on Cloud Run, managed by Pulumi
+
+Ryan chose Google Cloud Run for the Go API and Pulumi (Go) to manage it. `infra/` enables the APIs, builds `backend/` for linux/amd64 into Artifact Registry, keeps the Neon `main` pooled connection string in Secret Manager, and runs one Cloud Run service in `us-east4`, the region closest to Neon's aws-us-east-1. Scaling is 0 to 1 instances because migrations run at start. Invoke is public; every RPC still needs a Neon Auth JWT. The stack config names the GCP project and holds the encrypted database URL, so it stays out of git.
+
+Neon stays outside Pulumi for now. The project already exists, and the community `kislerdm/neon` provider has no Neon Auth resource. Neon Auth settings (the Apple provider, SMTP, the trusted origin) are a separate step.
+
+Date: 2026-11-02. Status: accepted.
