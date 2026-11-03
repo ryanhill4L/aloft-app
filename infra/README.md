@@ -67,7 +67,7 @@ gcloud run services update aloft-api --region us-east4 --update-labels rotated=$
 ## After the first deploy
 
 1. Read the URL with `terraform output url`.
-2. Check the service: `curl <url>/healthz` prints `ok`.
+2. Check the service: `curl <url>/health` prints `ok`. (Cloud Run reserves paths ending in `z`, so `/healthz` would never reach the API.)
 3. Put the URL in `ios/Config/Local.xcconfig` as `ALOFT_API_URL` for Release builds. Debug builds read that file too, so scope the line, and write `https:/$()/` in place of `https://` as the other xcconfig files do:
 
    ```
