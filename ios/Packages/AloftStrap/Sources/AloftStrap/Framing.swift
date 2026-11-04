@@ -197,6 +197,13 @@ extension Array where Element == UInt8 {
     func u32(at i: Int) -> UInt32 {
         UInt32(self[i]) | UInt32(self[i + 1]) << 8 | UInt32(self[i + 2]) << 16 | UInt32(self[i + 3]) << 24
     }
+
+    /// Little-endian float32. Nil when the bits are not a finite number.
+    func f32(at i: Int) -> Float? {
+        guard i >= 0, i + 4 <= count else { return nil }
+        let value = Float(bitPattern: u32(at: i))
+        return value.isFinite ? value : nil
+    }
 }
 
 extension Array where Element == UInt8 {

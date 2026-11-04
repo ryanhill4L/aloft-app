@@ -22,21 +22,50 @@ public struct RRInterval: Sendable, Equatable {
     }
 }
 
+/// One second of strap motion, in milli-g (1000 = 1 g).
+///
+/// Gravity outside 0.25...4 g is left nil; heart rate from that second is
+/// still stored. `dynamicMilliG` is the strap's own gravity-removed magnitude
+/// when that float sits in 0...8 g. `sleepByte` is the raw WHOOP 5 v18 byte
+/// at absolute offset 81 (high nibble: 0 wake, 1 still, 2 asleep, 3 up). It
+/// is not a sleep stage. Nil on WHOOP 4 and on frames that do not reach it.
+public struct MotionSample: Sendable, Equatable {
+    public var timestampMs: Int64
+    public var xMilliG: Int?
+    public var yMilliG: Int?
+    public var zMilliG: Int?
+    public var dynamicMilliG: Int?
+    public var sleepByte: UInt8?
+
+    public init(timestampMs: Int64, xMilliG: Int?, yMilliG: Int?, zMilliG: Int?, dynamicMilliG: Int?, sleepByte: UInt8?) {
+        self.timestampMs = timestampMs
+        self.xMilliG = xMilliG
+        self.yMilliG = yMilliG
+        self.zMilliG = zMilliG
+        self.dynamicMilliG = dynamicMilliG
+        self.sleepByte = sleepByte
+    }
+}
+
 public struct SampleBatch: Sendable, Equatable {
     public var heartRate: [HeartRateSample]
     public var rr: [RRInterval]
+    public var motion: [MotionSample]
 
-    public init(heartRate: [HeartRateSample] = [], rr: [RRInterval] = []) {
+    public init(heartRate: [HeartRateSample] = [], rr: [RRInterval] = [], motion: [MotionSample] = []) {
         self.heartRate = heartRate
         self.rr = rr
+        self.motion = motion
     }
 
-    public var isEmpty: Bool { heartRate.isEmpty && rr.isEmpty }
+    public var isEmpty: Bool { heartRate.isEmpty && rr.isEmpty && motion.isEmpty }
 }
 
 public struct StoreCounts: Sendable, Equatable {
     public var heartRate: Int
     public var rr: Int
+    /// Rows that have a gravity vector. A sleep-byte-only second is not counted.
+    public var motion: Int
     public var latestHeartRateMs: Int64?
 }
 
@@ -72,6 +101,19 @@ public actor StrapStore {
                 id INTEGER NOT NULL,
                 PRIMARY KEY (ts, id)
             ) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS motion (
+                ts_ms INTEGER PRIMARY KEY,
+                x_mg INTEGER,
+                y_mg INTEGER,
+                z_mg INTEGER,
+                dyn_mg INTEGER,
+                sleep_byte INTEGER,
+                CHECK (
+                    (x_mg IS NULL AND y_mg IS NULL AND z_mg IS NULL)
+                    OR (x_mg IS NOT NULL AND y_mg IS NOT NULL AND z_mg IS NOT NULL)
+                ),
+                CHECK (x_mg IS NOT NULL OR sleep_byte IS NOT NULL)
+            ) WITHOUT ROWID;
             """)
         Self.protect(url)
     }
@@ -93,6 +135,27 @@ public actor StrapStore {
             for interval in batch.rr {
                 rr.bind([interval.timestampMs, Int64(interval.milliseconds)])
                 try rr.step()
+                written += 1
+            }
+            let motion = try db.prepare("""
+                INSERT OR IGNORE INTO motion (ts_ms, x_mg, y_mg, z_mg, dyn_mg, sleep_byte)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """)
+            for sample in batch.motion {
+                let gravity: (Int64, Int64, Int64, Int64?)? = {
+                    guard let x = sample.xMilliG, let y = sample.yMilliG, let z = sample.zMilliG else { return nil }
+                    return (Int64(x), Int64(y), Int64(z), sample.dynamicMilliG.map(Int64.init))
+                }()
+                guard gravity != nil || sample.sleepByte != nil else { continue }
+                motion.bind([
+                    sample.timestampMs,
+                    gravity?.0,
+                    gravity?.1,
+                    gravity?.2,
+                    gravity?.3,
+                    sample.sleepByte.map { Int64($0) },
+                ])
+                try motion.step()
                 written += 1
             }
         }
@@ -132,8 +195,56 @@ public actor StrapStore {
         try hr.step()
         let rr = try db.prepare("SELECT COUNT(*) FROM rr_interval")
         try rr.step()
+        let motion = try db.prepare("SELECT COUNT(*) FROM motion WHERE x_mg IS NOT NULL")
+        try motion.step()
         let latest = hr.int(1)
-        return StoreCounts(heartRate: hr.int(0), rr: rr.int(0), latestHeartRateMs: latest == 0 ? nil : Int64(latest))
+        return StoreCounts(
+            heartRate: hr.int(0),
+            rr: rr.int(0),
+            motion: motion.int(0),
+            latestHeartRateMs: latest == 0 ? nil : Int64(latest)
+        )
+    }
+
+    public func heartRate(fromMs: Int64, throughMs: Int64) throws -> [HeartRateSample] {
+        let rows = try db.prepare("SELECT ts_ms, bpm FROM heart_rate WHERE ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms")
+        rows.bind([fromMs, throughMs])
+        var out: [HeartRateSample] = []
+        while try rows.step() {
+            out.append(HeartRateSample(timestampMs: Int64(rows.int(0)), bpm: rows.int(1)))
+        }
+        return out
+    }
+
+    public func rrIntervals(fromMs: Int64, throughMs: Int64) throws -> [RRInterval] {
+        let rows = try db.prepare("SELECT ts_ms, ms FROM rr_interval WHERE ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms, ms")
+        rows.bind([fromMs, throughMs])
+        var out: [RRInterval] = []
+        while try rows.step() {
+            out.append(RRInterval(timestampMs: Int64(rows.int(0)), milliseconds: rows.int(1)))
+        }
+        return out
+    }
+
+    public func motion(fromMs: Int64, throughMs: Int64) throws -> [MotionSample] {
+        let rows = try db.prepare("""
+            SELECT ts_ms, x_mg, y_mg, z_mg, dyn_mg, sleep_byte
+            FROM motion WHERE ts_ms >= ? AND ts_ms <= ? ORDER BY ts_ms
+            """)
+        rows.bind([fromMs, throughMs])
+        var out: [MotionSample] = []
+        while try rows.step() {
+            let sleep = rows.intOrNil(5).flatMap { UInt8(exactly: $0) }
+            out.append(MotionSample(
+                timestampMs: Int64(rows.int(0)),
+                xMilliG: rows.intOrNil(1),
+                yMilliG: rows.intOrNil(2),
+                zMilliG: rows.intOrNil(3),
+                dynamicMilliG: rows.intOrNil(4),
+                sleepByte: sleep
+            ))
+        }
+        return out
     }
 
     /// Truncates the WAL. Call when the app goes to the background.

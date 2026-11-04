@@ -40,7 +40,7 @@ Aloft is not affiliated with WHOOP. It is not a medical device. Scores, when the
 ## Non-goals
 
 - Feature parity with NOOP or with the official WHOOP app.
-- Coaching, workouts, journal, alarms, firmware updates. (A Crew of up to 12 sharing weather words is in scope; see decision 5.)
+- Coaching, workouts, journal, firmware updates. A personal sleep alarm and morning recap are specified in [docs/sleep-plan.md](docs/sleep-plan.md). (A Crew of up to 12 sharing weather words is in scope; see decision 5.)
 - HealthKit, trends, and widgets until the strap path is proven (see [docs/roadmap.md](docs/roadmap.md)).
 - Commercial distribution. Use is personal and noncommercial. See [LICENSE](LICENSE).
 
@@ -75,6 +75,7 @@ Put your own bundle and team id in `ios/Config/Local.xcconfig` (untracked) befor
 - [docs/protocol-notes.md](docs/protocol-notes.md) — strap BLE, from that code
 - [docs/design.md](docs/design.md) — look and layout
 - [docs/roadmap.md](docs/roadmap.md) — milestones
+- [docs/sleep-plan.md](docs/sleep-plan.md) — alarm, overnight watch, morning recap
 - [docs/decisions.md](docs/decisions.md) — decision log
 
 ## License

@@ -61,6 +61,7 @@ final class StrapLink: NSObject {
     private var whoop4Encoder = CommandEncoder<Whoop4Generation>()
     private var whoop5Encoder = CommandEncoder<Whoop5Generation>()
     private var history: HistorySync?
+    private var notedHistoryLayout = false
     private var commandCharacteristic: CBCharacteristic?
     private var peripherals: [UUID: CBPeripheral] = [:]
 
@@ -263,6 +264,7 @@ final class StrapLink: NSObject {
         peripheral = p
         p.delegate = self
         reassembler = Reassembler(family: family)
+        notedHistoryLayout = false
         if let store { history = HistorySync(family: family, store: store) }
         central?.connect(p)
         note("connecting \(id)")
@@ -444,6 +446,10 @@ final class StrapLink: NSObject {
                 continue
             }
             guard let history, [.historicalData, .metadata, .consoleLogs].contains(frame.type) else { continue }
+            if frame.type == .historicalData, !notedHistoryLayout {
+                notedHistoryLayout = true
+                note("history layout \(frame.sequence)")
+            }
             let (outcome, ack) = await history.receive(frame, now: Int64(Date.now.timeIntervalSince1970))
             switch outcome {
             case let .ack(rows, trim):

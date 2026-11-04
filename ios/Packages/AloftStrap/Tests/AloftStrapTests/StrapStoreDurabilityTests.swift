@@ -105,4 +105,38 @@ import Testing
         try await store.insert(batch)
         #expect(try await store.counts().heartRate == 1)
     }
+
+    @Test func motionSurvivesRelaunchWithSidecarsDeleted() async throws {
+        let url = dir.appending(path: "motion-\(UUID().uuidString)/\(StrapStore.fileName)")
+        let night = MotionSample(timestampMs: 1_700_000_000_000, xMilliG: 0, yMilliG: 0, zMilliG: 1000, dynamicMilliG: 9, sleepByte: 0x20)
+        let flagOnly = MotionSample(timestampMs: 1_700_000_001_000, xMilliG: nil, yMilliG: nil, zMilliG: nil, dynamicMilliG: nil, sleepByte: 0)
+        do {
+            let store = try StrapStore(url: url)
+            try await store.insert(SampleBatch(motion: [night, flagOnly]))
+            try await store.insert(SampleBatch(motion: [night]))
+        }
+        for sidecar in ["-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: url.path + sidecar)
+        }
+        let reopened = try StrapStore(url: url)
+        #expect(try await reopened.counts().motion == 1)
+        #expect(try await reopened.motion(fromMs: night.timestampMs, throughMs: night.timestampMs) == [night])
+        #expect(try await reopened.motion(fromMs: flagOnly.timestampMs, throughMs: flagOnly.timestampMs) == [flagOnly])
+        let hr = HeartRateSample(timestampMs: night.timestampMs, bpm: 52)
+        try await reopened.insert(SampleBatch(heartRate: [hr], rr: [RRInterval(timestampMs: night.timestampMs, milliseconds: 1100)]))
+        #expect(try await reopened.heartRate(fromMs: night.timestampMs, throughMs: night.timestampMs) == [hr])
+        #expect(try await reopened.rrIntervals(fromMs: 0, throughMs: night.timestampMs - 1).isEmpty)
+    }
+
+    @Test func anOlderFileGainsTheMotionTable() async throws {
+        let url = dir.appending(path: "legacy-\(UUID().uuidString)/\(StrapStore.fileName)")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let db = try SQLiteConnection(path: url.path)
+        try db.execute("CREATE TABLE heart_rate (ts_ms INTEGER PRIMARY KEY, bpm INTEGER NOT NULL) WITHOUT ROWID")
+        let store = try StrapStore(url: url)
+        let sample = MotionSample(timestampMs: 1_700_000_000_000, xMilliG: 12, yMilliG: -4, zMilliG: 1000, dynamicMilliG: nil, sleepByte: nil)
+        try await store.insert(SampleBatch(motion: [sample]))
+        #expect(try await store.counts().motion == 1)
+        #expect(try await store.motion(fromMs: sample.timestampMs, throughMs: sample.timestampMs) == [sample])
+    }
 }

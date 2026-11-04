@@ -23,8 +23,17 @@ import Testing
     }
 
     /// A synthetic v18 WHOOP 5 record: unix at 15, HR at 22, R-R at 23/24.
-    static func w5Record(unix: UInt32, hr: UInt8, rr: [UInt16]) -> [UInt8] {
-        var body = [UInt8](repeating: 0, count: 48) // frame offsets 11...
+    /// Gravity floats, when set, sit at absolute 45/49/53. Dynamic acceleration
+    /// is at 41. The sleep-state byte is at 81, so the body grows to reach it.
+    static func w5Record(
+        unix: UInt32,
+        hr: UInt8,
+        rr: [UInt16],
+        gravity: (Float, Float, Float)? = nil,
+        dynamic: Float? = nil,
+        sleepByte: UInt8? = nil
+    ) -> [UInt8] {
+        var body = [UInt8](repeating: 0, count: sleepByte == nil ? 48 : 71)
         body.replaceSubrange(4..<8, with: le32(unix))
         body[11] = hr
         body[12] = UInt8(rr.count)
@@ -32,7 +41,33 @@ import Testing
             body[13 + 2 * i] = UInt8(v & 0xFF)
             body[14 + 2 * i] = UInt8(v >> 8)
         }
+        if let gravity {
+            putFloat(&body, at: 45 - 11, gravity.0)
+            putFloat(&body, at: 49 - 11, gravity.1)
+            putFloat(&body, at: 53 - 11, gravity.2)
+        }
+        if let dynamic { putFloat(&body, at: 41 - 11, dynamic) }
+        if let sleepByte { body[81 - 11] = sleepByte }
         return Frame.encode(.whoop5, type: 47, sequence: 18, command: 0, body: body)
+    }
+
+    /// WHOOP 4 v24 gravity is at absolute 40/44/48. Sequence 5 has no gravity block.
+    static func w4LongRecord(unix: UInt32, hr: UInt8, sequence: UInt8, gravityZ: Float) -> [UInt8] {
+        var body = [UInt8](repeating: 0, count: 48)
+        body.replaceSubrange(4..<8, with: le32(unix))
+        body[14] = hr
+        putFloat(&body, at: 40 - 7, 0)
+        putFloat(&body, at: 44 - 7, 0)
+        putFloat(&body, at: 48 - 7, gravityZ)
+        return Frame.encode(.whoop4, type: 47, sequence: sequence, command: 0, body: body)
+    }
+
+    static func putFloat(_ body: inout [UInt8], at index: Int, _ value: Float) {
+        let bits = value.bitPattern
+        body[index] = UInt8(truncatingIfNeeded: bits)
+        body[index + 1] = UInt8(truncatingIfNeeded: bits >> 8)
+        body[index + 2] = UInt8(truncatingIfNeeded: bits >> 16)
+        body[index + 3] = UInt8(truncatingIfNeeded: bits >> 24)
     }
 
     @Test func endMarkersKeepTheirBlockVerbatim() throws {
@@ -112,6 +147,80 @@ import Testing
         let (outcome, ack) = await sync.receive(event, now: Self.now)
         #expect(outcome == .ignored)
         #expect(ack == nil)
+    }
+
+    @Test func storesGravityOnV18AndNotOnAShortOrGenericRecord() throws {
+        let still = try Frame(family: .whoop5, bytes: Self.w5Record(
+            unix: 1_780_916_150, hr: 102, rr: [602], gravity: (0, 0, 1), dynamic: 0.25, sleepByte: 0x20
+        ))
+        #expect(still.historicalSamples().motion == [MotionSample(
+            timestampMs: 1_780_916_150_000, xMilliG: 0, yMilliG: 0, zMilliG: 1000, dynamicMilliG: 250, sleepByte: 0x20
+        )])
+
+        let zeros = try Frame(family: .whoop5, bytes: Self.w5Record(unix: 1_780_916_150, hr: 102, rr: [602]))
+        #expect(zeros.historicalSamples().motion.isEmpty)
+        #expect(zeros.historicalSamples().heartRate.map(\.bpm) == [102])
+
+        let flung = try Frame(family: .whoop5, bytes: Self.w5Record(
+            unix: 1_780_916_150, hr: 102, rr: [], gravity: (0, 0, 10), dynamic: 9
+        ))
+        #expect(flung.historicalSamples().motion.isEmpty)
+        #expect(flung.historicalSamples().heartRate.map(\.bpm) == [102])
+
+        let noisy = try Frame(family: .whoop5, bytes: Self.w5Record(
+            unix: 1_780_916_150, hr: 80, rr: [], gravity: (0, 0, 1), dynamic: 9
+        ))
+        #expect(noisy.historicalSamples().motion == [MotionSample(
+            timestampMs: 1_780_916_150_000, xMilliG: 0, yMilliG: 0, zMilliG: 1000, dynamicMilliG: nil, sleepByte: nil
+        )])
+
+        let v24 = try Frame(family: .whoop4, bytes: Self.w4LongRecord(unix: 1_780_000_000, hr: 58, sequence: 24, gravityZ: 1))
+        #expect(v24.historicalSamples().motion.first?.zMilliG == 1000)
+        #expect(v24.historicalSamples().motion.first?.sleepByte == nil)
+        let v12 = try Frame(family: .whoop4, bytes: Self.w4LongRecord(unix: 1_780_000_000, hr: 58, sequence: 12, gravityZ: 1))
+        #expect(v12.historicalSamples().motion.first?.zMilliG == 1000)
+
+        let generic = try Frame(family: .whoop4, bytes: Self.w4LongRecord(unix: 1_780_000_000, hr: 58, sequence: 5, gravityZ: 1))
+        #expect(generic.historicalSamples().motion.isEmpty)
+        #expect(generic.historicalSamples().heartRate.map(\.bpm) == [58])
+    }
+
+    @Test func motionIsInTheMainFileBeforeTheAck() async throws {
+        let url = FileManager.default.temporaryDirectory.appending(path: "aloft-motion-\(UUID().uuidString)/\(StrapStore.fileName)")
+        let store = try StrapStore(url: url)
+        let sync = HistorySync(family: .whoop5, store: store)
+        let record = try Frame(family: .whoop5, bytes: Self.w5Record(
+            unix: 1_780_916_150, hr: 102, rr: [602], gravity: (0, 0, 1), dynamic: 0.25, sleepByte: 0x20
+        ))
+        #expect(await sync.receive(record, now: Self.now).0 == .collected)
+        let (outcome, ack) = await sync.receive(try Frame(family: .whoop5, bytes: Self.w5End), now: Self.now)
+        #expect(outcome == .ack(rowsWritten: 3, trim: 112_193))
+        #expect(ack != nil)
+
+        let copyDir = url.deletingLastPathComponent().appending(path: "main-only")
+        try FileManager.default.createDirectory(at: copyDir, withIntermediateDirectories: true)
+        let copy = copyDir.appending(path: StrapStore.fileName)
+        try FileManager.default.copyItem(at: url, to: copy)
+        let opened = try StrapStore(url: copy)
+        let rows = try await opened.motion(fromMs: 0, throughMs: 2_000_000_000_000)
+        #expect(rows == [MotionSample(
+            timestampMs: 1_780_916_150_000, xMilliG: 0, yMilliG: 0, zMilliG: 1000, dynamicMilliG: 250, sleepByte: 0x20
+        )])
+        #expect(try await opened.counts().motion == 1)
+    }
+
+    @Test func implausibleMotionIsDroppedWithItsHeartRate() throws {
+        var session = HistorySession()
+        let stale = try Frame(family: .whoop5, bytes: Self.w5Record(
+            unix: 1_000, hr: 60, rr: [], gravity: (0, 0, 1), sleepByte: 0x20
+        ))
+        _ = session.receive(stale, now: Self.now)
+        guard case let .persist(batch, _, _) = session.receive(try Frame(family: .whoop5, bytes: Self.w5End), now: Self.now) else {
+            Issue.record("expected persist")
+            return
+        }
+        #expect(batch.heartRate.isEmpty)
+        #expect(batch.motion.isEmpty)
     }
 
     @Test func standardHeartRate() {
