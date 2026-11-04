@@ -22,6 +22,9 @@ enum Preview {
         case "basics": model.route = .onboarding(.basics)
         case "band": model.route = .onboarding(.band)
         case "bandcheck": model.route = .bandCheck
+        case "log":
+            model.route = .home
+            model.strap.previewPairingWait()
         case "health": model.route = .onboarding(.health)
         case "crew":
             model.crew = nil

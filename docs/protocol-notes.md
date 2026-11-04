@@ -46,7 +46,7 @@ WHOOP 4, from [`PROTOCOL_WHOOP4.md`](https://github.com/ryanbr/noop/blob/2a1de76
 
 Then, once per connection: `GET_HELLO_HARVARD` (35), `GET_ADVERTISING_NAME_HARVARD` (76), `REPORT_VERSION_INFO` (7), `SET_CLOCK` (10), `GET_CLOCK` (11), `SEND_R10_R11_REALTIME` (63) with `[0x00]` to stop the type-43 flood, `GET_DATA_RANGE` (34), then the first history offload. Clock command forms are outside the documented 41.17.6.0 set; read the clock back.
 
-WHOOP 5/MG: subscribe the fd4b notify characteristics, then write this fixed 16-byte client hello to `fd4b0002` ([`DeviceFamily.whoop5ClientHello`](https://github.com/ryanbr/noop/blob/2a1de7609843b095505274ad6fc811757210be80/Packages/WhoopProtocol/Sources/WhoopProtocol/DeviceFamily.swift#L270-L274)):
+WHOOP 5/MG: write this fixed 16-byte client hello to `fd4b0002` with a response, and only then subscribe the fd4b notify characteristics. The confirmed write is what asks the OS to start a just-works bond. Subscribing `fd4b0003` / `0004` / `0005` / `0007` first is refused (authentication or encryption insufficient) and wedges that bond. The bytes are command 145, not a key exchange ([`DeviceFamily.whoop5ClientHello`](https://github.com/ryanbr/noop/blob/2a1de7609843b095505274ad6fc811757210be80/Packages/WhoopProtocol/Sources/WhoopProtocol/DeviceFamily.swift#L270-L274), and the later hardware-verified order in noop `BLEManager.didDiscoverCharacteristics`, issue 17):
 
 ```text
 AA 01 08 00 00 01 E6 71 23 01 91 01 36 3E 5C 8D

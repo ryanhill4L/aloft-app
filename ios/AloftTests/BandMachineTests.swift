@@ -67,28 +67,71 @@ final class BandMachineTests: XCTestCase {
         XCTAssertTrue(ready.subscribe)
         XCTAssertTrue(machine.canCommand)
 
-        var pairing = BandMachine()
-        _ = pairing.send(.find)
-        _ = pairing.send(.discovered(strap))
-        _ = pairing.send(.connected)
+        var pairing = reachPairing()
         let first = pairing.send(.authRefused)
         XCTAssertEqual(pairing.state, .pairing)
-        XCTAssertEqual(pairing.pairingAttempts, 1)
-        XCTAssertTrue(first.cancel)
-        XCTAssertTrue(first.schedulePairWait)
-        XCTAssertTrue(pairing.expectingDrop)
+        XCTAssertTrue(pairing.waitingForPairing)
+        XCTAssertFalse(first.cancel)
+        XCTAssertFalse(pairing.expectingDrop)
+        XCTAssertEqual(first.schedulePairWait, BandMachine.pairingPromptSeconds)
+        XCTAssertEqual(BandMachine.pairingPromptSeconds, 30)
+        XCTAssertTrue(first.awaitingPairing)
+        XCTAssertTrue(pairing.statusLine.contains("Waiting for iOS pairing"))
+
+        let second = pairing.send(.authRefused)
+        XCTAssertFalse(second.cancel)
+        XCTAssertNil(second.schedulePairWait)
+        XCTAssertEqual(pairing.state, .pairing)
+
+        let retry = pairing.send(.encryptionUp)
+        XCTAssertTrue(retry.retryHello)
+        XCTAssertEqual(pairing.state, .pairing)
+        let ignored = pairing.send(.encryptionUp)
+        XCTAssertFalse(ignored.retryHello)
+
+        let readyAfter = pairing.send(.paired)
+        XCTAssertEqual(pairing.state, .ready)
+        XCTAssertTrue(readyAfter.subscribe)
+
+        var timed = reachPairing()
+        _ = timed.send(.authRefused)
+        let done = timed.send(.pairWaitElapsed)
+        XCTAssertEqual(timed.state, .failed(BandMachine.pairingFailed))
+        XCTAssertTrue(done.cancel)
+        XCTAssertTrue(timed.expectingDrop)
+        XCTAssertFalse(timed.statusLine.contains("WHOOP app"))
+        XCTAssertTrue(BandMachine.pairingFailed.contains("flash blue"))
+    }
+
+    func testDropDuringThePromptWaitDoesNotReconnect() {
+        var pairing = reachPairing()
+        _ = pairing.send(.authRefused)
+        let drop = pairing.send(.linkDropped)
+        XCTAssertEqual(pairing.state, .failed(BandMachine.pairingFailed))
+        XCTAssertFalse(drop.connect)
+        XCTAssertNil(drop.schedulePairWait)
+        XCTAssertNil(drop.scheduleBackoff)
+    }
+
+    func testDropBeforeHelloRetriesTheLinkOnce() {
+        var pairing = reachPairing()
+        let drop = pairing.send(.linkDropped)
+        XCTAssertTrue(drop.cancel)
+        XCTAssertEqual(drop.schedulePairWait, BandMachine.pairWaitSeconds)
+        XCTAssertEqual(pairing.state, .pairing)
+        XCTAssertFalse(pairing.waitingForPairing)
 
         let echo = pairing.send(.linkDropped)
         XCTAssertFalse(echo.cancel)
         XCTAssertEqual(pairing.state, .pairing)
 
         let again = pairing.send(.pairWaitElapsed)
-        XCTAssertEqual(again.connect, true)
+        XCTAssertTrue(again.connect)
         _ = pairing.send(.connected)
-        let second = pairing.send(.authRefused)
-        XCTAssertEqual(pairing.state, .failed(BandMachine.pairingFailed))
-        XCTAssertFalse(second.schedulePairWait)
-        XCTAssertFalse(pairing.statusLine.contains("WHOOP app"))
+        let refused = pairing.send(.authRefused)
+        XCTAssertEqual(pairing.state, .pairing)
+        XCTAssertFalse(refused.cancel)
+        XCTAssertTrue(pairing.waitingForPairing)
     }
 
     func testUnexpectedConnectIsCancelled() {
@@ -155,6 +198,14 @@ final class BandMachineTests: XCTestCase {
         XCTAssertTrue(BandMachine.isPairingRefusal(domain: "CBATTErrorDomain", code: 15))
         XCTAssertFalse(BandMachine.isPairingRefusal(domain: "CBATTErrorDomain", code: 1))
         XCTAssertFalse(BandMachine.isPairingRefusal(domain: "CBErrorDomain", code: 5))
+    }
+
+    private func reachPairing() -> BandMachine {
+        var machine = BandMachine()
+        _ = machine.send(.find)
+        _ = machine.send(.discovered(strap))
+        _ = machine.send(.connected)
+        return machine
     }
 
     private func paired() -> BandMachine {

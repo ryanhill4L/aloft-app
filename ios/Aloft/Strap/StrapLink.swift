@@ -26,6 +26,9 @@ final class StrapLink: NSObject {
     private var findWhenPowered = false
     private var helloSent = false
     private var pendingNotifies: [CBCharacteristic] = []
+    private var batteryCharacteristic: CBCharacteristic?
+    private var connectedAt: Date?
+    private var probeNotedMissing = false
     private let memoryKey = "aloft.strap.id"
 
     var state: State { machine.state }
@@ -139,7 +142,13 @@ final class StrapLink: NSObject {
         if outcome.retrieve { retrieve() }
         if outcome.connect { connectCurrent() }
         if outcome.subscribe { subscribeAndStart() }
-        if outcome.schedulePairWait { schedule(BandMachine.pairWaitSeconds, .pairWaitElapsed) }
+        if let seconds = outcome.schedulePairWait { schedule(seconds, .pairWaitElapsed) }
+        if outcome.awaitingPairing {
+            let since = millisecondsSinceConnect().map { " \($0)ms since connect" } ?? ""
+            note("\(StrapLines.waitingForPairing)\(since)")
+            watchForEncryption(generation: timerID)
+        }
+        if outcome.retryHello { retryHello() }
         if let seconds = outcome.scheduleBackoff { schedule(seconds, .backoffElapsed) }
     }
 
@@ -152,6 +161,58 @@ final class StrapLink: NSObject {
             self.apply(self.machine.send(event))
         }
     }
+
+    /// Reads the standard battery characteristic until it succeeds or the prompt
+    /// wait ends. On a 5/MG that read is refused until the link is encrypted, so
+    /// a success is the moment to send the hello one more time.
+    private func watchForEncryption(generation: Int) {
+        guard family == .whoop5 else { return }
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(BandMachine.encryptionProbeSeconds))
+                guard let self, generation == self.timerID else { return }
+                guard self.state == .pairing, self.machine.waitingForPairing, !self.machine.helloRetried else { return }
+                self.probeEncryption()
+            }
+        }
+    }
+
+    private func probeEncryption() {
+        guard let peripheral, let batteryCharacteristic else {
+            if !probeNotedMissing {
+                probeNotedMissing = true
+                note("encryption probe skipped: no battery characteristic")
+            }
+            return
+        }
+        note("encryption probe: read 2A19")
+        peripheral.readValue(for: batteryCharacteristic)
+    }
+
+    private func retryHello() {
+        guard state == .pairing, commandCharacteristic != nil else { return }
+        note(family == .whoop5 ? "hello retry withResponse" : "bond retry withResponse")
+        write(family == .whoop4 ? sharedFrame(.getBatteryLevel) : CommandEncoder<Whoop5Generation>.clientHello)
+    }
+
+    private func millisecondsSinceConnect() -> Int? {
+        guard let connectedAt else { return nil }
+        return Int(Date.now.timeIntervalSince(connectedAt) * 1000)
+    }
+
+    #if DEBUG
+    /// Drives the same refusal the phone hits, without opening Bluetooth, so the
+    /// Log tab can show the waiting line in the Simulator.
+    func previewPairingWait() {
+        let id = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        _ = machine.send(.find)
+        _ = machine.send(.discovered(id))
+        _ = machine.send(.connected)
+        let outcome = machine.send(.authRefused)
+        note(outcome.log)
+        note(StrapLines.waitingForPairing)
+    }
+    #endif
 
     private func scan() {
         let services = [CBUUID(string: StrapGATT.whoop4.service), CBUUID(string: StrapGATT.whoop5.service)]
@@ -187,6 +248,8 @@ final class StrapLink: NSObject {
         helloSent = false
         pendingNotifies = []
         commandCharacteristic = nil
+        batteryCharacteristic = nil
+        probeNotedMissing = false
         switch family {
         case .whoop4: whoop4Encoder = CommandEncoder()
         case .whoop5: whoop5Encoder = CommandEncoder()
@@ -201,7 +264,8 @@ final class StrapLink: NSObject {
 
     /// Puffin notifies wait until the hello write is accepted. Subscribing
     /// them first is refused (authentication/encryption insufficient) and
-    /// wedges the system pairing prompt.
+    /// wedges the bond. noop BLEManager retains fd4b0003/4/5/7 here and
+    /// subscribes them only from the confirmed-write callback.
     private func subscribeAndStart() {
         guard let peripheral else { return }
         for c in pendingNotifies {
@@ -502,6 +566,7 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        connectedAt = .now
         note("connected; discovering services")
         let outcome = machine.send(.connected)
         apply(outcome)
@@ -515,9 +580,18 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        note("disconnected: \(Self.describe(error))")
+        let ns = error.map { $0 as NSError }
+        // Read this before linkDropped clears it. A nil error is what our own cancel produces.
+        let localCancel = machine.expectingDrop
+        note(StrapLines.disconnected(
+            domain: ns.map(\.domain),
+            code: ns.map(\.code),
+            millisecondsSinceConnect: millisecondsSinceConnect(),
+            localCancel: localCancel
+        ))
         commandCharacteristic = nil
         helloSent = false
+        batteryCharacteristic = nil
         apply(machine.send(.linkDropped))
     }
 
@@ -542,8 +616,10 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
         let characteristics = service.characteristics ?? []
         note("characteristics of \(Self.short(service.uuid)) \(Self.describe(error)): "
             + characteristics.map { "\(Self.short($0.uuid))[\(Self.describe($0.properties))]" }.joined(separator: " "))
+        let battery = CBUUID(string: StrapGATT.batteryLevel)
         for c in characteristics {
             if c.uuid == heart { peripheral.setNotifyValue(true, for: c) }
+            if c.uuid == battery { batteryCharacteristic = c }
             if puffin.contains(c.uuid), !pendingNotifies.contains(where: { $0.uuid == c.uuid }) {
                 pendingNotifies.append(c)
             }
@@ -553,7 +629,7 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
         helloSent = true
         // 5/MG: the hello write, with a response, is what asks iOS to pair.
         // Puffin notifies stay off until that write is accepted.
-        note(family == .whoop5 ? "hello write" : "bond write")
+        note(family == .whoop5 ? "hello write withResponse" : "bond write withResponse")
         write(family == .whoop4 ? sharedFrame(.getBatteryLevel) : CommandEncoder<Whoop5Generation>.clientHello)
     }
 
@@ -586,6 +662,18 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if characteristic.uuid == CBUUID(string: StrapGATT.batteryLevel) {
+            // A 5/MG refuses this read until the link is encrypted (noop #490).
+            // Success is the signal to send the hello again, once.
+            if error == nil, characteristic.value != nil,
+               family == .whoop5, state == .pairing, machine.waitingForPairing, !machine.helloRetried {
+                note("encryption up")
+                apply(machine.send(.encryptionUp))
+            } else if state == .pairing, machine.waitingForPairing {
+                note("encryption probe \(Self.describe(error))")
+            }
+            return
+        }
         guard let data = characteristic.value else {
             note("rx \(Self.short(characteristic.uuid)) empty \(Self.describe(error))")
             return

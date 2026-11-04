@@ -1,3 +1,4 @@
+import AloftStrap
 import Foundation
 
 /// Who connects, when pairing may be tried again, and when a drop backs off.
@@ -53,6 +54,7 @@ struct BandMachine: Equatable {
         case authRefused
         case linkDropped
         case pairWaitElapsed
+        case encryptionUp
         case backoffElapsed
         case disconnect
         case forget
@@ -67,24 +69,32 @@ struct BandMachine: Equatable {
         var cancel = false
         var clearMemory = false
         var subscribe = false
-        var schedulePairWait = false
+        /// Seconds to stay in pairing before the next decision. Nil means don't arm one.
+        var schedulePairWait: Int?
+        var awaitingPairing = false
+        var retryHello = false
         var scheduleBackoff: Int?
         var cancelTimers = false
     }
 
     /// After a ready link drops. One attempt at each delay, then stop.
     static let backoffSeconds = [2, 5, 15, 60]
-    /// Time for the iOS pairing prompt before the single retry.
+    /// After a drop we did not ask for, before one reconnect.
     static let pairWaitSeconds = 12
+    /// How long to hold the link after ATT 5 or 15 so iOS can show pairing.
+    /// Cancelling here is what aborts the prompt.
+    static let pairingPromptSeconds = 30
+    /// Gap before reading the battery characteristic, which a 5/MG refuses until the link is encrypted.
+    static let encryptionProbeSeconds = 5
 
-    static let pairingFailed = "Pairing didn't finish. Keep the strap close, accept the iOS prompt, then tap Retry."
+    static let pairingFailed = "Pairing didn't finish. Tap the band until the LEDs flash blue, then tap Retry."
     static let dropped = "The strap dropped. Tap Retry."
     static let notAllowed = "Bluetooth isn't allowed. Allow it in Settings, then tap Retry."
 
     /// ATT codes that mean the link is not encrypted yet. 5 is authentication,
     /// 15 is encryption. Locale-independent, unlike the error string.
     static func isPairingRefusal(domain: String, code: Int) -> Bool {
-        domain == "CBATTErrorDomain" && (code == 5 || code == 15)
+        StrapLines.isEncryptionRefusal(domain: domain, code: code)
     }
 
     var state: State = .idle
@@ -92,6 +102,10 @@ struct BandMachine: Equatable {
     /// Find was asked, and Disconnect or Forget has not cancelled it.
     var wantsLink = false
     var pairingAttempts = 0
+    /// ATT 5 or 15 arrived, and the link is being held for the iOS prompt.
+    var waitingForPairing = false
+    /// The hello (or WHOOP 4 bond write) has been sent again after encryption came up.
+    var helloRetried = false
     var drops = 0
     /// The next link-dropped callback is one we caused by cancelling.
     var expectingDrop = false
@@ -108,9 +122,9 @@ struct BandMachine: Equatable {
         case .connecting:
             if let waitSeconds { "Connecting in \(waitSeconds)s." } else { "Connecting." }
         case .pairing:
-            pairingAttempts == 0
-                ? "Pairing. Accept the iOS prompt if it appears."
-                : "Pairing. Waiting for the iOS prompt, then trying once more."
+            waitingForPairing
+                ? "Waiting for iOS pairing. Keep the strap close."
+                : "Pairing."
         case .ready:
             "Ready. The strap can take commands."
         case .failed(let reason):
@@ -163,7 +177,7 @@ struct BandMachine: Equatable {
             pairingAttempts = 0
             drops = 0
             expectingDrop = false
-            waitSeconds = nil
+            clearPairingWait()
             outcome.cancelTimers = true
             outcome.stopScan = true
             state = .connecting
@@ -172,7 +186,7 @@ struct BandMachine: Equatable {
             switch state {
             case .connecting, .pairing:
                 state = .pairing
-                waitSeconds = nil
+                clearPairingWait()
                 outcome.cancelTimers = true
             default:
                 // A connect we did not ask for. Cancelling is what stops the
@@ -183,19 +197,50 @@ struct BandMachine: Equatable {
         case .paired:
             guard state == .pairing else { break }
             pairingAttempts = 0
-            waitSeconds = nil
+            clearPairingWait()
             state = .ready
             outcome.subscribe = true
             outcome.cancelTimers = true
         case .authRefused:
-            refuse(&outcome)
+            guard state == .pairing else { break }
+            // Another 5 or 15 while the prompt wait is already running must not
+            // cancel the link. That cancel is what aborts iOS pairing.
+            if waitingForPairing { break }
+            waitingForPairing = true
+            helloRetried = false
+            waitSeconds = Self.pairingPromptSeconds
+            outcome.schedulePairWait = Self.pairingPromptSeconds
+            outcome.awaitingPairing = true
+        case .encryptionUp:
+            guard state == .pairing, waitingForPairing, !helloRetried else { break }
+            helloRetried = true
+            outcome.retryHello = true
         case .pairWaitElapsed:
+            if waitingForPairing {
+                guard state == .pairing else { break }
+                outcome.cancel = true
+                outcome.cancelTimers = true
+                expectingDrop = true
+                clearPairingWait()
+                state = .failed(Self.pairingFailed)
+                break
+            }
             guard state == .pairing, pairingAttempts == 1, remembered != nil else { break }
             waitSeconds = nil
             expectingDrop = false
             state = .connecting
             outcome.connect = true
         case .linkDropped:
+            if state == .pairing, waitingForPairing, !expectingDrop {
+                // The strap left during the prompt wait. Reconnecting would
+                // hammer a bond it is refusing. The log already has the error.
+                outcome.cancel = true
+                outcome.cancelTimers = true
+                expectingDrop = true
+                clearPairingWait()
+                state = .failed(Self.pairingFailed)
+                break
+            }
             if expectingDrop || waitSeconds != nil {
                 expectingDrop = false
                 break
@@ -237,7 +282,7 @@ struct BandMachine: Equatable {
         case .disconnect:
             wantsLink = false
             expectingDrop = true
-            waitSeconds = nil
+            clearPairingWait()
             outcome.cancel = true
             outcome.stopScan = true
             outcome.cancelTimers = true
@@ -246,7 +291,7 @@ struct BandMachine: Equatable {
             wantsLink = false
             expectingDrop = true
             remembered = nil
-            waitSeconds = nil
+            clearPairingWait()
             outcome.cancel = true
             outcome.stopScan = true
             outcome.cancelTimers = true
@@ -262,7 +307,7 @@ struct BandMachine: Equatable {
         pairingAttempts = 0
         drops = 0
         expectingDrop = false
-        waitSeconds = nil
+        clearPairingWait()
         outcome.cancelTimers = true
         if remembered != nil {
             state = .connecting
@@ -274,8 +319,9 @@ struct BandMachine: Equatable {
         }
     }
 
-    /// One wait, then one more try. A second refusal stops. Cancelling the
-    /// link is required: CoreBluetooth otherwise reconnects on its own.
+    /// A drop before any ATT refusal: cancel so CoreBluetooth does not reconnect
+    /// on its own, wait, then try the link once more. A second drop stops.
+    /// An encryption refusal does not come through here. That path holds the link.
     private mutating func refuse(_ outcome: inout Outcome) {
         outcome.cancel = true
         outcome.cancelTimers = true
@@ -284,10 +330,16 @@ struct BandMachine: Equatable {
             pairingAttempts = 1
             waitSeconds = Self.pairWaitSeconds
             state = .pairing
-            outcome.schedulePairWait = true
+            outcome.schedulePairWait = Self.pairWaitSeconds
         } else {
             waitSeconds = nil
             state = .failed(Self.pairingFailed)
         }
+    }
+
+    private mutating func clearPairingWait() {
+        waitingForPairing = false
+        helloRetried = false
+        waitSeconds = nil
     }
 }
