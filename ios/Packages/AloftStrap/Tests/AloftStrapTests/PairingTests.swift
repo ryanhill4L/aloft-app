@@ -22,11 +22,11 @@ import Testing
         #expect(StrapLines.waitingForPairing == "waiting for iOS pairing")
     }
 
-    @Test func storedBondIsAuthenticationAfterTheRetry() {
-        #expect(StrapLines.storedBondRefused(waiting: true, retriedHello: true, code: 5))
-        #expect(!StrapLines.storedBondRefused(waiting: true, retriedHello: true, code: 15))
-        #expect(!StrapLines.storedBondRefused(waiting: true, retriedHello: false, code: 5))
-        #expect(!StrapLines.storedBondRefused(waiting: false, retriedHello: true, code: 5))
+    @Test func authenticationAfterTheRetryIsNotAnotherEncryptionWait() {
+        #expect(StrapLines.refusedAfterEncrypt(waiting: true, retriedHello: true, code: 5))
+        #expect(!StrapLines.refusedAfterEncrypt(waiting: true, retriedHello: true, code: 15))
+        #expect(!StrapLines.refusedAfterEncrypt(waiting: true, retriedHello: false, code: 5))
+        #expect(!StrapLines.refusedAfterEncrypt(waiting: false, retriedHello: true, code: 5))
         #expect(StrapLines.encryptedButRefused.contains("no prompt"))
     }
 }

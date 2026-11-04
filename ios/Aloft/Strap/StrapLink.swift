@@ -211,8 +211,8 @@ final class StrapLink: NSObject {
         _ = machine.send(.connected)
         _ = machine.send(.authRefused)
         _ = machine.send(.encryptionUp)
-        let outcome = machine.send(.staleBond)
-        lastError = BandMachine.staleBond
+        let outcome = machine.send(.offWrist)
+        lastError = BandMachine.offWrist
         note(StrapLines.waitingForPairing)
         note("battery read ok")
         note(StrapLines.encryptedButRefused)
@@ -652,9 +652,9 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
         if let error {
             if Self.isPairingRefusal(error) {
                 let code = (error as NSError).code
-                if StrapLines.storedBondRefused(waiting: machine.waitingForPairing, retriedHello: machine.helloRetried, code: code) {
+                if StrapLines.refusedAfterEncrypt(waiting: machine.waitingForPairing, retriedHello: machine.helloRetried, code: code) {
                     note(StrapLines.encryptedButRefused)
-                    apply(machine.send(.staleBond))
+                    apply(machine.send(.offWrist))
                 } else {
                     apply(machine.send(.authRefused))
                 }

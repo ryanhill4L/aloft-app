@@ -103,19 +103,23 @@ final class BandMachineTests: XCTestCase {
         XCTAssertTrue(BandMachine.pairingFailed.contains("flash blue"))
     }
 
-    func testAuthenticationAfterTheRetryStopsForTheStoredBond() {
+    func testAuthenticationAfterTheRetryShowsTheOffWristSteps() {
         var pairing = reachPairing()
-        _ = pairing.send(.authRefused)
+        let first = pairing.send(.authRefused)
+        XCTAssertEqual(first.schedulePairWait, BandMachine.pairingPromptSeconds)
+        XCTAssertFalse(first.cancel)
         XCTAssertTrue(pairing.send(.encryptionUp).retryHello)
-        let refused = pairing.send(.staleBond)
-        XCTAssertEqual(pairing.state, .failed(BandMachine.staleBond))
+        let refused = pairing.send(.offWrist)
+        XCTAssertEqual(pairing.state, .failed(BandMachine.offWrist))
         XCTAssertTrue(refused.cancel)
         XCTAssertFalse(refused.connect)
         XCTAssertNil(refused.schedulePairWait)
-        XCTAssertTrue(pairing.statusLine.contains("old Bluetooth bond"))
-        XCTAssertTrue(pairing.statusLine.contains("Reset All Settings"))
-        XCTAssertFalse(pairing.statusLine.contains("flash blue"))
-        XCTAssertFalse(pairing.statusLine.contains("WHOOP app"))
+        XCTAssertTrue(pairing.statusLine.contains("off your wrist"))
+        XCTAssertTrue(pairing.statusLine.contains("underside lights"))
+        XCTAssertTrue(pairing.statusLine.contains("two fingers"))
+        XCTAssertTrue(pairing.statusLine.contains("only blue"))
+        XCTAssertFalse(pairing.statusLine.contains("Reset All Settings"))
+        XCTAssertFalse(pairing.statusLine.contains("old Bluetooth bond"))
     }
 
     func testDropDuringThePromptWaitDoesNotReconnect() {

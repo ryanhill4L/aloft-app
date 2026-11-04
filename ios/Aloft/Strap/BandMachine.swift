@@ -55,7 +55,7 @@ struct BandMachine: Equatable {
         case linkDropped
         case pairWaitElapsed
         case encryptionUp
-        case staleBond
+        case offWrist
         case backoffElapsed
         case disconnect
         case forget
@@ -89,8 +89,9 @@ struct BandMachine: Equatable {
     static let encryptionProbeSeconds = 5
 
     static let pairingFailed = "Pairing didn't finish. Tap the band until the LEDs flash blue, then tap Retry."
-    /// Build 4: the link encrypted with no prompt, then the same hello got ATT 5.
-    static let staleBond = "The phone reused an old Bluetooth bond and the strap refused it. Reset All Settings, then tap Retry."
+    /// ATT 5 after the link encrypted. The off-wrist taps are what put this strap
+    /// into pairing mode; tapping it while worn did not light the side blue.
+    static let offWrist = "Take the strap off your wrist and wait until the underside lights are off. Hold it by the sides and tap the top of the sensor firmly with two fingers until the side light is only blue. Then tap Retry."
     static let dropped = "The strap dropped. Tap Retry."
     static let notAllowed = "Bluetooth isn't allowed. Allow it in Settings, then tap Retry."
 
@@ -218,15 +219,16 @@ struct BandMachine: Equatable {
             guard state == .pairing, waitingForPairing, !helloRetried else { break }
             helloRetried = true
             outcome.retryHello = true
-        case .staleBond:
-            // The retry was refused with ATT 5. Waiting out the prompt cannot
-            // raise an already-encrypted link. Let go so the strap is free.
+        case .offWrist:
+            // The retried hello got ATT 5. The first ATT 15 already held the
+            // link; staying longer does not show the steps that put the strap
+            // in pairing mode. Let go so those taps can.
             guard state == .pairing, waitingForPairing, helloRetried else { break }
             outcome.cancel = true
             outcome.cancelTimers = true
             expectingDrop = true
             clearPairingWait()
-            state = .failed(Self.staleBond)
+            state = .failed(Self.offWrist)
         case .pairWaitElapsed:
             if waitingForPairing {
                 guard state == .pairing else { break }
