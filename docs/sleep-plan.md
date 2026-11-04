@@ -2,14 +2,16 @@
 
 Ryan wants three things: set an alarm in the app, have the app watch the night, and see a recap in the morning. His strap is a WHOOP 5.0/MG. Pairing works on a phone (main, including the off-wrist path from pull request 12). This page splits the rest into small pull requests. It does not start the Today screen, and it does not send health data to the backend.
 
-## Questions for Ryan
+## Decided
 
-These block the alarm screen and the recap. They do not block storing the night.
+Ryan, 2026-11-04:
 
-1. **Smart wake.** Should the alarm be a single time, or a window that tries to buzz near the end of a lighter stretch? If a window, how long (for example 20 or 30 minutes before the time he set)?
-2. **Sleep goal.** A target duration (and where it is shown), or no goal?
-3. **Morning recap.** A notification, a screen he opens, or both? If a notification, what one line should it say?
-4. **Phone fallback.** If the strap never buzzes, should the phone fire its own alarm? The strap path is still experimental (one captured wake, on firmware 50.41.1.0, and this unit's firmware is unconfirmed). A phone alarm needs notification permission and will sound even if the strap is out of range.
+1. **Smart wake.** Yes. A 30-minute window that ends at the time he set.
+2. **Sleep goal.** 8 hours.
+3. **Morning recap.** A notification and a screen.
+4. **Phone alarm.** No. The strap buzz is the only alarm. The phone does not sound if the strap misses it.
+
+The 5/MG `SET_ALARM_TIME` revision-4 record is one epoch. It has no window field (NOOP `docs/PROTOCOL_ALARMS.md`, WHOOP 5/MG section). The guaranteed buzz is armed at the end of the window. An earlier buzz, if the phone is connected and the minute is a stir or a wake, is a separate strap buzz, then the slot is cleared so the deadline does not fire again.
 
 ## What already exists
 
@@ -42,12 +44,12 @@ Reads for a time window: `heartRate(fromMs:throughMs:)`, `rrIntervals(fromMs:thr
 
 ### 2. Sleep detector
 
-A pure function over one stored night. No Bluetooth and no network.
+A pure function over one stored night. No Bluetooth and no network. `stages` is nil.
 
-- In-bed start, sleep onset, wake, and duration.
-- Efficiency as time asleep divided by time in bed, and only when both ends were found.
-- Stages only if a small motion-and-heart-rate heuristic is worth showing. Label it as an on-device estimate. It is not WHOOP's model, and it is not medical. Byte 81 can be a hint and a later comparison point. It cannot be drawn as deep, REM, and light.
-- Honest accuracy note on the screen and in this doc once the rule exists: what it uses, what it ignores (no breaths-per-minute channel, no cloud model), and that a match against Ryan's WHOOP numbers is still to be done.
+- A minute is asleep when motion is at or under 0.015 g and heart rate is missing or at most 75. Beat intervals supply the rate only when the heart-rate byte is missing. A minute over 0.040 g, or a heart rate of 90 or more, is awake. Anything between is a stir (`restless`), not a stage.
+- Onset is the first 10 asleep minutes. Wake is the first 5 awake minutes after that. The end of the recording is not a wake, so efficiency stays nil until a wake is found. Efficiency is time asleep divided by time in bed.
+- Light, deep, and REM are not estimated. There is no breaths-per-minute channel and no cloud model. A match against Ryan's WHOOP numbers is still to be done on a real night.
+- Smart wake uses the same minutes: inside the 30 minutes before the deadline, a stir or a wake that follows sleep asks for an early strap buzz. It does not move the deadline.
 
 ### 3. Alarm screen
 
