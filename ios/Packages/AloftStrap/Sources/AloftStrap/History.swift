@@ -24,16 +24,20 @@ extension Frame {
         }
     }
 
-    /// Heart rate and R-R from one type-47 record. R-R values in history are
-    /// already milliseconds on both families. Unknown layouts yield nothing.
+    /// Heart rate, R-R, and motion from one type-47 record. R-R values in
+    /// history are already milliseconds on both families. Motion offsets are
+    /// absolute per generation: do not add four to a WHOOP 4 gravity offset
+    /// and call it 5/MG. Unknown layouts yield nothing.
     public func historicalSamples() -> SampleBatch {
         guard type == .historicalData else { return SampleBatch() }
-        let layout: (time: Int, hr: Int, count: Int, rr: Int)
+        let layout: (time: Int, hr: Int, count: Int, rr: Int, motion: MotionLayout?)
         switch (family, sequence) {
-        case (.whoop4, 5), (.whoop4, 7), (.whoop4, 9), (.whoop4, 12), (.whoop4, 24):
-            layout = (11, 21, 22, 23)
+        case (.whoop4, 5), (.whoop4, 7), (.whoop4, 9):
+            layout = (11, 21, 22, 23, nil)
+        case (.whoop4, 12), (.whoop4, 24):
+            layout = (11, 21, 22, 23, MotionLayout(x: 40, y: 44, z: 48, dynamic: nil, sleepByte: nil))
         case (.whoop5, 18):
-            layout = (15, 22, 23, 24)
+            layout = (15, 22, 23, 24, MotionLayout(x: 45, y: 49, z: 53, dynamic: 41, sleepByte: 81))
         default:
             return SampleBatch()
         }
@@ -52,8 +56,55 @@ extension Frame {
                 batch.rr.append(RRInterval(timestampMs: ms, milliseconds: Int(value)))
             }
         }
+        if let motion = layout.motion, let sample = motionSample(ms: ms, layout: motion) {
+            batch.motion.append(sample)
+        }
         return batch
     }
+
+    /// A field that ends before the CRC-32 trailer.
+    private func fits(_ offset: Int, _ length: Int) -> Bool {
+        offset >= 0 && offset + length <= bytes.count - 4
+    }
+
+    private func motionSample(ms: Int64, layout: MotionLayout) -> MotionSample? {
+        var x: Int?
+        var y: Int?
+        var z: Int?
+        var dynamic: Int?
+        if fits(layout.x, 4), fits(layout.y, 4), fits(layout.z, 4),
+           let gx = bytes.f32(at: layout.x), let gy = bytes.f32(at: layout.y), let gz = bytes.f32(at: layout.z) {
+            let magnitude = (gx * gx + gy * gy + gz * gz).squareRoot()
+            if magnitude >= 0.25, magnitude <= 4 {
+                x = milliG(gx)
+                y = milliG(gy)
+                z = milliG(gz)
+                if let at = layout.dynamic, fits(at, 4), let value = bytes.f32(at: at), value >= 0, value <= 8 {
+                    dynamic = milliG(value)
+                }
+            }
+        }
+        var sleep: UInt8?
+        if let at = layout.sleepByte, fits(at, 1) {
+            sleep = bytes[at]
+        }
+        guard x != nil || sleep != nil else { return nil }
+        return MotionSample(timestampMs: ms, xMilliG: x, yMilliG: y, zMilliG: z, dynamicMilliG: dynamic, sleepByte: sleep)
+    }
+}
+
+/// Absolute frame offsets for the gravity block. `dynamic` and `sleepByte`
+/// exist on WHOOP 5 v18 only.
+private struct MotionLayout {
+    var x: Int
+    var y: Int
+    var z: Int
+    var dynamic: Int?
+    var sleepByte: Int?
+}
+
+private func milliG(_ g: Float) -> Int {
+    Int((Double(g) * 1_000).rounded())
 }
 
 /// What happened when a frame reached the history state machine.
@@ -108,6 +159,7 @@ public struct HistorySession: Sendable {
                 let samples = record.historicalSamples()
                 batch.heartRate += samples.heartRate.filter { Self.plausible($0.timestampMs, now: now) }
                 batch.rr += samples.rr.filter { Self.plausible($0.timestampMs, now: now) }
+                batch.motion += samples.motion.filter { Self.plausible($0.timestampMs, now: now) }
             }
             return .persist(batch: batch, trim: trim, endData: endData)
         case nil:

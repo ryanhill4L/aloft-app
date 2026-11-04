@@ -75,6 +75,19 @@ final class Statement {
         }
     }
 
+    func bind(_ values: [Int64?]) {
+        sqlite3_reset(stmt)
+        sqlite3_clear_bindings(stmt)
+        for (index, value) in values.enumerated() {
+            let column = Int32(index + 1)
+            if let value {
+                sqlite3_bind_int64(stmt, column, value)
+            } else {
+                sqlite3_bind_null(stmt, column)
+            }
+        }
+    }
+
     /// Returns true while a row is available; false when done.
     @discardableResult
     func step() throws -> Bool {
@@ -86,6 +99,11 @@ final class Statement {
     }
 
     func int(_ column: Int32) -> Int { Int(sqlite3_column_int64(stmt, column)) }
+
+    func intOrNil(_ column: Int32) -> Int? {
+        guard sqlite3_column_type(stmt, column) != SQLITE_NULL else { return nil }
+        return Int(sqlite3_column_int64(stmt, column))
+    }
 }
 
 public enum StoreError: Error, Equatable {

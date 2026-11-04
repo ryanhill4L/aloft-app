@@ -33,6 +33,10 @@ A single screen in the spirit of the official WHOOP app: recovery, strain, and s
 
 Open until then: whether the strain dial shows WHOOP's 0–21 or NOOP's rescaled 0–100. See [design.md](design.md).
 
+## Sleep
+
+Specified in [sleep-plan.md](sleep-plan.md). Ryan asked for an alarm, an overnight watch, and a morning recap ahead of the Today dials. The first slice extends the milestone 1 store (motion next to heart rate and R-R). The detector, the alarm screen, and the recap are later pull requests. Product questions at the top of that page are still open.
+
 ## 3+
 
 Only after Today is in daily use. Candidates, not commitments:

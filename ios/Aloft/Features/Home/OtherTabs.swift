@@ -120,7 +120,6 @@ struct LogTab: View {
                 Text(strap.statusLine)
                     .textStyle(.small)
                     .foregroundStyle(Palette.inkMuted)
-                alarmSection(strap)
                 Card {
                     VStack(spacing: 0) {
                         row("Link", strap.state.name)
@@ -129,9 +128,11 @@ struct LogTab: View {
                         row("Last error", strap.lastError ?? "None")
                         row("HR rows", counts.map { "\($0.heartRate)" } ?? "—")
                         row("R-R rows", counts.map { "\($0.rr)" } ?? "—")
+                        row("Motion rows", counts.map { "\($0.motion)" } ?? "—")
                         row("Store", strap.store == nil ? "Unavailable" : "On this phone", last: true)
                     }
                 }
+                alarmSection(strap)
                 HStack(spacing: Space.s3) {
                     Button("Find") { strap.find() }.buttonStyle(.ghost)
                     Button("Retry") { strap.retry() }.buttonStyle(.ghost)
@@ -260,7 +261,7 @@ struct LogTab: View {
 
     private func report(_ strap: StrapLink) -> String {
         var lines = ["Aloft strap log", "state: \(strap.state.name)", strap.statusLine]
-        if let counts { lines.append("hr: \(counts.heartRate), rr: \(counts.rr)") }
+        if let counts { lines.append("hr: \(counts.heartRate), rr: \(counts.rr), motion: \(counts.motion)") }
         if let error = strap.lastError { lines.append("last error: \(error)") }
         if let clock = strap.clockNote { lines.append(clock) }
         if let read = strap.alarmReadback { lines.append(alarmText(read).replacingOccurrences(of: "\n", with: " ")) }
