@@ -42,6 +42,8 @@ struct RootView: View {
                     HomeView()
                 case .bandCheck:
                     BandCheckView()
+                case .wake:
+                    WakeView()
                 }
             }
             .animation(.smooth(duration: 0.25), value: model.route)
