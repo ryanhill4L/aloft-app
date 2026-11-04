@@ -12,9 +12,7 @@ import Observation
 @MainActor
 @Observable
 final class StrapLink: NSObject {
-    enum State: Equatable {
-        case off, unauthorized, idle, scanning, connecting, bonding, syncing, live, failed(String)
-    }
+    typealias State = BandMachine.State
 
     struct Found: Identifiable, Equatable {
         let id: UUID
@@ -23,9 +21,16 @@ final class StrapLink: NSObject {
         let rssi: Int
     }
 
-    private(set) var state: State = .idle {
-        didSet { if state != oldValue { note("state \(oldValue) → \(state)") } }
-    }
+    private var machine = BandMachine()
+    private var timerID = 0
+    private var findWhenPowered = false
+    private var helloSent = false
+    private var pendingNotifies: [CBCharacteristic] = []
+    private let memoryKey = "aloft.strap.id"
+
+    var state: State { machine.state }
+    var canCommand: Bool { machine.canCommand && commandCharacteristic != nil }
+    var statusLine: String { machine.statusLine }
     private(set) var found: [Found] = []
     private(set) var liveBPM: Int?
     private(set) var lastSync: Date?
@@ -66,6 +71,9 @@ final class StrapLink: NSObject {
         let (stream, continuation) = AsyncStream.makeStream(of: [UInt8].self)
         incoming = continuation
         super.init()
+        if let saved = UserDefaults.standard.string(forKey: memoryKey) {
+            machine.remembered = UUID(uuidString: saved)
+        }
         if store == nil { note("store unavailable; history will not be acked") }
         Task { [weak self] in
             await self?.reloadEvents()
@@ -73,51 +81,147 @@ final class StrapLink: NSObject {
         }
     }
 
-    /// Creates the central lazily so the Bluetooth prompt appears on the Band
-    /// step, not at launch.
-    func startScan() {
-        if central == nil {
+    /// Creates the central lazily so the Bluetooth prompt appears on Find,
+    /// not at launch. A found strap is connected from here; the Log tab does
+    /// not have a second tap.
+    func find() {
+        guard central != nil else {
             note("creating central")
+            findWhenPowered = true
             central = CBCentralManager(delegate: self, queue: .main)
             return
         }
         guard central?.state == .poweredOn else {
-            note("scan skipped: central \(central.map { Self.describe($0.state) } ?? "nil")")
+            let event: BandMachine.Event = central?.state == .unauthorized ? .notAllowed : .poweredOff
+            apply(machine.send(event))
             return
         }
         found = []
-        state = .scanning
+        apply(machine.send(.find))
+    }
+
+    func retry() { find() }
+
+    func connect(_ strap: Found) {
+        family = strap.family
+        apply(machine.send(.choose(strap.id)))
+    }
+
+    func disconnect() { apply(machine.send(.disconnect)) }
+
+    /// Drops the link and the remembered peripheral, so the next Find can
+    /// pick a different strap.
+    func forget() { apply(machine.send(.forget)) }
+
+    private func readyToSend() -> Bool {
+        guard canCommand else {
+            note("command skipped: \(state)")
+            return false
+        }
+        return true
+    }
+
+    private func apply(_ outcome: BandMachine.Outcome) {
+        note(outcome.log)
+        if case let .failed(reason) = machine.state { lastError = reason }
+        if let id = machine.remembered?.uuidString {
+            UserDefaults.standard.set(id, forKey: memoryKey)
+        }
+        if outcome.clearMemory {
+            UserDefaults.standard.removeObject(forKey: memoryKey)
+        }
+        if outcome.cancelTimers { timerID += 1 }
+        if outcome.cancel, let peripheral {
+            central?.cancelPeripheralConnection(peripheral)
+        }
+        if outcome.stopScan { central?.stopScan() }
+        if outcome.scan { scan() }
+        if outcome.retrieve { retrieve() }
+        if outcome.connect { connectCurrent() }
+        if outcome.subscribe { subscribeAndStart() }
+        if outcome.schedulePairWait { schedule(BandMachine.pairWaitSeconds, .pairWaitElapsed) }
+        if let seconds = outcome.scheduleBackoff { schedule(seconds, .backoffElapsed) }
+    }
+
+    private func schedule(_ seconds: Int, _ event: BandMachine.Event) {
+        timerID += 1
+        let id = timerID
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard let self, id == self.timerID else { return }
+            self.apply(self.machine.send(event))
+        }
+    }
+
+    private func scan() {
         let services = [CBUUID(string: StrapGATT.whoop4.service), CBUUID(string: StrapGATT.whoop5.service)]
         central?.scanForPeripherals(withServices: services)
         note("scan started")
     }
 
-    func connect(_ strap: Found) {
-        guard let p = peripherals[strap.id] else { return }
-        central?.stopScan()
-        family = strap.family
-        reassembler = Reassembler(family: family)
+    /// Remembered strap first: a connected one, then one iOS still knows.
+    /// A miss falls through to a scan.
+    private func retrieve() {
+        guard let id = machine.remembered, let central else {
+            apply(machine.send(.retrieved(false)))
+            return
+        }
+        let services = [CBUUID(string: StrapGATT.whoop5.service), CBUUID(string: StrapGATT.whoop4.service)]
+        let connected = central.retrieveConnectedPeripherals(withServices: services)
+        let known = central.retrievePeripherals(withIdentifiers: [id])
+        guard let match = (connected + known).first(where: { $0.identifier == id }) else {
+            note("remembered strap not retrieved")
+            apply(machine.send(.retrieved(false)))
+            return
+        }
+        peripherals[id] = match
+        note("retrieved \(id)")
+        apply(machine.send(.retrieved(true)))
+    }
+
+    private func connectCurrent() {
+        guard let id = machine.remembered, let p = peripherals[id] else {
+            note("connect skipped: no peripheral")
+            return
+        }
+        helloSent = false
+        pendingNotifies = []
+        commandCharacteristic = nil
         switch family {
         case .whoop4: whoop4Encoder = CommandEncoder()
         case .whoop5: whoop5Encoder = CommandEncoder()
         }
-        if let store { history = HistorySync(family: family, store: store) }
         peripheral = p
         p.delegate = self
-        state = .connecting
+        reassembler = Reassembler(family: family)
+        if let store { history = HistorySync(family: family, store: store) }
         central?.connect(p)
-        note("connecting \(strap.name) \(strap.id) family \(family) rssi \(strap.rssi)")
+        note("connecting \(id)")
     }
 
-    func disconnect() {
-        note("disconnect requested")
-        if let peripheral { central?.cancelPeripheralConnection(peripheral) }
-        state = .idle
+    /// Puffin notifies wait until the hello write is accepted. Subscribing
+    /// them first is refused (authentication/encryption insufficient) and
+    /// wedges the system pairing prompt.
+    private func subscribeAndStart() {
+        guard let peripheral else { return }
+        for c in pendingNotifies {
+            peripheral.setNotifyValue(true, for: c)
+        }
+        guard let history else { return }
+        note("paired; sending connect sequence")
+        for frame in connectFrames(unixSeconds: UInt32(Date.now.timeIntervalSince1970)) { write(frame) }
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard self.state == .ready else { return }
+            note("history offload requested")
+            write(await history.startFrame())
+        }
     }
 
     /// 5/MG command 19. WHOOP 4 uses command 79. Each builder exists only on
     /// that generation's encoder.
     func buzz() {
+        guard readyToSend() else { return }
         switch family {
         case .whoop5:
             note("buzz")
@@ -131,6 +235,7 @@ final class StrapLink: NSObject {
     /// Slot 1, two minutes from the phone clock. Logs the strap clock first
     /// when a GET_CLOCK reply has already been read.
     func armInTwoMinutes() {
+        guard readyToSend() else { return }
         let phone = UInt32(Date.now.timeIntervalSince1970)
         if let strap = strapClockUnix {
             let line = "clock before arm: strap \(strap) phone \(phone) delta \(Int64(phone) - Int64(strap))s"
@@ -155,6 +260,7 @@ final class StrapLink: NSObject {
 
     /// GET_ALARM_TIME. 5/MG reads slot 1. The reply lands in `alarmReadback`.
     func readAlarm() {
+        guard readyToSend() else { return }
         switch family {
         case .whoop5:
             guard let slot = Whoop5Generation.AlarmSlot(rawValue: 1) else { return }
@@ -168,6 +274,7 @@ final class StrapLink: NSObject {
 
     /// 5/MG `02 FF` clears every slot. WHOOP 4 has one alarm, body `01`.
     func disarmAll() {
+        guard readyToSend() else { return }
         switch family {
         case .whoop5:
             note("disarm all slots")
@@ -203,12 +310,6 @@ final class StrapLink: NSObject {
         let stamp = Date.now.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute().second())
         log.append("\(stamp) \(line)")
         if log.count > Self.maxLogLines { log.removeFirst(log.count - Self.maxLogLines) }
-    }
-
-    private func fail(_ message: String) {
-        lastError = message
-        state = .failed(message)
-        note("error: \(message)")
     }
 
     private func write(_ bytes: [UInt8]) {
@@ -280,9 +381,9 @@ final class StrapLink: NSObject {
                 lastSync = .now
                 note("chunk stored: \(rows) rows, trim \(trim), acked")
             case .stalled:
-                fail("A history write failed. Nothing more is acked until reconnect.")
+                lastError = "A history write failed. Nothing more is acked until reconnect."
+                note(lastError ?? "")
             case .complete:
-                state = .live
                 lastSync = .now
                 note("history complete")
             case .collected, .ignored:
@@ -367,10 +468,20 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         note("central \(Self.describe(central.state))")
         switch central.state {
-        case .poweredOn: startScan()
-        case .unauthorized: state = .unauthorized
-        case .poweredOff: state = .off
-        default: break
+        case .poweredOn:
+            if findWhenPowered {
+                findWhenPowered = false
+                found = []
+                apply(machine.send(.find))
+            } else {
+                apply(machine.send(.poweredOn))
+            }
+        case .unauthorized:
+            apply(machine.send(.notAllowed))
+        case .poweredOff:
+            apply(machine.send(.poweredOff))
+        default:
+            break
         }
     }
 
@@ -386,28 +497,39 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
             found.append(strap)
             note("found \(name) \(strap.id) family \(family) rssi \(strap.rssi) services \(services.map(Self.short))")
         }
+        self.family = family
+        apply(machine.send(.discovered(strap.id)))
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        state = .bonding
         note("connected; discovering services")
+        let outcome = machine.send(.connected)
+        apply(outcome)
+        guard state == .pairing else { return }
         peripheral.discoverServices(nil)
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         note("connect failed: \(Self.describe(error))")
-        fail(error?.localizedDescription ?? "Couldn't connect.")
+        apply(machine.send(.linkDropped))
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         note("disconnected: \(Self.describe(error))")
-        if case .failed = state { return }
-        state = .idle
+        commandCharacteristic = nil
+        helloSent = false
+        apply(machine.send(.linkDropped))
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         let services = peripheral.services ?? []
         note("services \(Self.describe(error)): \(services.map { Self.short($0.uuid) })")
+        if services.contains(where: { $0.uuid == CBUUID(string: StrapGATT.whoop4.service) }) {
+            family = .whoop4
+        } else if services.contains(where: { $0.uuid == CBUUID(string: StrapGATT.whoop5.service) }) {
+            family = .whoop5
+        }
+        reassembler = Reassembler(family: family)
         for service in services {
             peripheral.discoverCharacteristics(nil, for: service)
         }
@@ -415,38 +537,52 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         let gatt = StrapGATT.forFamily(family)
-        let notify = Set((gatt.notify + [StrapGATT.heartRateMeasurement]).map { CBUUID(string: $0) })
+        let puffin = Set(gatt.notify.map { CBUUID(string: $0) })
+        let heart = CBUUID(string: StrapGATT.heartRateMeasurement)
         let characteristics = service.characteristics ?? []
         note("characteristics of \(Self.short(service.uuid)) \(Self.describe(error)): "
             + characteristics.map { "\(Self.short($0.uuid))[\(Self.describe($0.properties))]" }.joined(separator: " "))
         for c in characteristics {
-            if notify.contains(c.uuid) { peripheral.setNotifyValue(true, for: c) }
+            if c.uuid == heart { peripheral.setNotifyValue(true, for: c) }
+            if puffin.contains(c.uuid), !pendingNotifies.contains(where: { $0.uuid == c.uuid }) {
+                pendingNotifies.append(c)
+            }
             if c.uuid == CBUUID(string: gatt.commandWrite) { commandCharacteristic = c }
         }
-        guard service.uuid == CBUUID(string: gatt.service), commandCharacteristic != nil else { return }
-        // The bond write. WHOOP 4: a battery read. 5/MG: the fixed client hello.
-        note("bond write")
+        guard state == .pairing, commandCharacteristic != nil, !helloSent else { return }
+        helloSent = true
+        // 5/MG: the hello write, with a response, is what asks iOS to pair.
+        // Puffin notifies stay off until that write is accepted.
+        note(family == .whoop5 ? "hello write" : "bond write")
         write(family == .whoop4 ? sharedFrame(.getBatteryLevel) : CommandEncoder<Whoop5Generation>.clientHello)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         note("notify \(Self.short(characteristic.uuid)) \(characteristic.isNotifying ? "on" : "off") \(Self.describe(error))")
+        if let error, Self.isPairingRefusal(error) {
+            apply(machine.send(.authRefused))
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         note("tx \(Self.short(characteristic.uuid)) result \(Self.describe(error))")
+        guard state == .pairing else { return }
         if let error {
-            return fail("Write failed: \(error.localizedDescription). Unpair the strap in the official WHOOP app, close it, then try again.")
+            if Self.isPairingRefusal(error) {
+                apply(machine.send(.authRefused))
+            } else {
+                lastError = "Write failed: \(error.localizedDescription)"
+                note(lastError ?? "")
+                apply(machine.send(.authRefused))
+            }
+            return
         }
-        guard state == .bonding, let history else { return }
-        state = .syncing
-        note("bonded; sending connect sequence")
-        for frame in connectFrames(unixSeconds: UInt32(Date.now.timeIntervalSince1970)) { write(frame) }
-        Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            note("history offload requested")
-            write(await history.startFrame())
-        }
+        apply(machine.send(.paired))
+    }
+
+    private static func isPairingRefusal(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return BandMachine.isPairingRefusal(domain: ns.domain, code: ns.code)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
