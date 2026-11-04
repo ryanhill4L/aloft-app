@@ -103,6 +103,21 @@ final class BandMachineTests: XCTestCase {
         XCTAssertTrue(BandMachine.pairingFailed.contains("flash blue"))
     }
 
+    func testAuthenticationAfterTheRetryStopsForTheStoredBond() {
+        var pairing = reachPairing()
+        _ = pairing.send(.authRefused)
+        XCTAssertTrue(pairing.send(.encryptionUp).retryHello)
+        let refused = pairing.send(.staleBond)
+        XCTAssertEqual(pairing.state, .failed(BandMachine.staleBond))
+        XCTAssertTrue(refused.cancel)
+        XCTAssertFalse(refused.connect)
+        XCTAssertNil(refused.schedulePairWait)
+        XCTAssertTrue(pairing.statusLine.contains("old Bluetooth bond"))
+        XCTAssertTrue(pairing.statusLine.contains("Reset All Settings"))
+        XCTAssertFalse(pairing.statusLine.contains("flash blue"))
+        XCTAssertFalse(pairing.statusLine.contains("WHOOP app"))
+    }
+
     func testDropDuringThePromptWaitDoesNotReconnect() {
         var pairing = reachPairing()
         _ = pairing.send(.authRefused)

@@ -55,6 +55,7 @@ struct BandMachine: Equatable {
         case linkDropped
         case pairWaitElapsed
         case encryptionUp
+        case staleBond
         case backoffElapsed
         case disconnect
         case forget
@@ -88,6 +89,8 @@ struct BandMachine: Equatable {
     static let encryptionProbeSeconds = 5
 
     static let pairingFailed = "Pairing didn't finish. Tap the band until the LEDs flash blue, then tap Retry."
+    /// Build 4: the link encrypted with no prompt, then the same hello got ATT 5.
+    static let staleBond = "The phone reused an old Bluetooth bond and the strap refused it. Reset All Settings, then tap Retry."
     static let dropped = "The strap dropped. Tap Retry."
     static let notAllowed = "Bluetooth isn't allowed. Allow it in Settings, then tap Retry."
 
@@ -215,6 +218,15 @@ struct BandMachine: Equatable {
             guard state == .pairing, waitingForPairing, !helloRetried else { break }
             helloRetried = true
             outcome.retryHello = true
+        case .staleBond:
+            // The retry was refused with ATT 5. Waiting out the prompt cannot
+            // raise an already-encrypted link. Let go so the strap is free.
+            guard state == .pairing, waitingForPairing, helloRetried else { break }
+            outcome.cancel = true
+            outcome.cancelTimers = true
+            expectingDrop = true
+            clearPairingWait()
+            state = .failed(Self.staleBond)
         case .pairWaitElapsed:
             if waitingForPairing {
                 guard state == .pairing else { break }
