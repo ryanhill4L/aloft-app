@@ -21,4 +21,12 @@ import Testing
         #expect(StrapLines.disconnected(domain: nil, code: nil, millisecondsSinceConnect: nil, localCancel: false).contains("no connect time"))
         #expect(StrapLines.waitingForPairing == "waiting for iOS pairing")
     }
+
+    @Test func authenticationAfterTheRetryIsNotAnotherEncryptionWait() {
+        #expect(StrapLines.refusedAfterEncrypt(waiting: true, retriedHello: true, code: 5))
+        #expect(!StrapLines.refusedAfterEncrypt(waiting: true, retriedHello: true, code: 15))
+        #expect(!StrapLines.refusedAfterEncrypt(waiting: true, retriedHello: false, code: 5))
+        #expect(!StrapLines.refusedAfterEncrypt(waiting: false, retriedHello: true, code: 5))
+        #expect(StrapLines.encryptedButRefused.contains("no prompt"))
+    }
 }

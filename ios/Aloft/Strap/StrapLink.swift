@@ -162,9 +162,10 @@ final class StrapLink: NSObject {
         }
     }
 
-    /// Reads the standard battery characteristic until it succeeds or the prompt
-    /// wait ends. On a 5/MG that read is refused until the link is encrypted, so
-    /// a success is the moment to send the hello one more time.
+    /// Reads the standard battery characteristic until it answers or the wait
+    /// ends. A success means that characteristic is readable. On build 4 it
+    /// answered while the same hello, retried, still got ATT 5, so it is not
+    /// proof the strap will accept a command.
     private func watchForEncryption(generation: Int) {
         guard family == .whoop5 else { return }
         Task { [weak self] in
@@ -201,16 +202,21 @@ final class StrapLink: NSObject {
     }
 
     #if DEBUG
-    /// Drives the same refusal the phone hits, without opening Bluetooth, so the
-    /// Log tab can show the waiting line in the Simulator.
+    /// Drives the build-4 refusal, without opening Bluetooth, so the Log tab
+    /// can show it in the Simulator.
     func previewPairingWait() {
         let id = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
         _ = machine.send(.find)
         _ = machine.send(.discovered(id))
         _ = machine.send(.connected)
-        let outcome = machine.send(.authRefused)
-        note(outcome.log)
+        _ = machine.send(.authRefused)
+        _ = machine.send(.encryptionUp)
+        let outcome = machine.send(.offWrist)
+        lastError = BandMachine.offWrist
         note(StrapLines.waitingForPairing)
+        note("battery read ok")
+        note(StrapLines.encryptedButRefused)
+        note(outcome.log)
     }
     #endif
 
@@ -645,7 +651,13 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
         guard state == .pairing else { return }
         if let error {
             if Self.isPairingRefusal(error) {
-                apply(machine.send(.authRefused))
+                let code = (error as NSError).code
+                if StrapLines.refusedAfterEncrypt(waiting: machine.waitingForPairing, retriedHello: machine.helloRetried, code: code) {
+                    note(StrapLines.encryptedButRefused)
+                    apply(machine.send(.offWrist))
+                } else {
+                    apply(machine.send(.authRefused))
+                }
             } else {
                 lastError = "Write failed: \(error.localizedDescription)"
                 note(lastError ?? "")
@@ -663,11 +675,11 @@ extension StrapLink: @MainActor CBCentralManagerDelegate, @MainActor CBPeriphera
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         if characteristic.uuid == CBUUID(string: StrapGATT.batteryLevel) {
-            // A 5/MG refuses this read until the link is encrypted (noop #490).
-            // Success is the signal to send the hello again, once.
+            // Build 4: this read succeeded and the retried hello still got ATT 5.
+            // Answered means "try the hello once more," not "the bond is good."
             if error == nil, characteristic.value != nil,
                family == .whoop5, state == .pairing, machine.waitingForPairing, !machine.helloRetried {
-                note("encryption up")
+                note("battery read ok")
                 apply(machine.send(.encryptionUp))
             } else if state == .pairing, machine.waitingForPairing {
                 note("encryption probe \(Self.describe(error))")
