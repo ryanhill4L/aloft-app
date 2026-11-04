@@ -228,12 +228,7 @@ struct BandStep: View {
                 Card {
                     VStack(alignment: .leading, spacing: Space.s4) {
                         Stamp(strap.found.isEmpty ? "Looking nearby" : "Found nearby")
-                        if strap.found.isEmpty {
-                            HStack(spacing: Space.s4) {
-                                bandGlyph
-                                Text(statusLine(strap.state)).textStyle(.small).foregroundStyle(Palette.inkMuted)
-                            }
-                        }
+                        Text(strap.statusLine).textStyle(.small).foregroundStyle(Palette.inkMuted)
                         ForEach(strap.found) { found in
                             Button { strap.connect(found) } label: {
                                 HStack(spacing: Space.s4) {
@@ -249,7 +244,7 @@ struct BandStep: View {
                         }
                     }
                 }
-                Text("The strap pairs with one app at a time. If nothing shows up, unpair it in the official WHOOP app and close that app, then come back.")
+                Text("The strap pairs with this phone. If iOS asks, tap Pair. It does not appear in Bluetooth settings.")
                     .textStyle(.small).foregroundStyle(Palette.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -257,31 +252,22 @@ struct BandStep: View {
                     .buttonStyle(.link)
                     .frame(maxWidth: .infinity)
             },
-            action: PrimaryAction(title: pairTitle(strap), enabled: !strap.found.isEmpty || strap.state == .live) {
-                if strap.state == .live || strap.state == .syncing {
+            action: PrimaryAction(title: pairTitle(strap), enabled: strap.state == .ready || !strap.found.isEmpty) {
+                if strap.state == .ready {
                     model.advance(from: .band)
                 } else if let first = strap.found.first {
                     strap.connect(first)
                 }
             }
         )
-        .onAppear { strap.startScan() }
+        .onAppear { strap.find() }
     }
 
     private func pairTitle(_ strap: StrapLink) -> String {
         switch strap.state {
-        case .connecting, .bonding: "Pairing…"
-        case .syncing, .live: "Continue"
+        case .connecting, .pairing: "Pairing…"
+        case .ready: "Continue"
         default: "Pair band"
-        }
-    }
-
-    private func statusLine(_ state: StrapLink.State) -> String {
-        switch state {
-        case .off: "Bluetooth is off. Turn it on in Control Center."
-        case .unauthorized: "Aloft needs Bluetooth. Allow it in Settings › Aloft."
-        case let .failed(message): message
-        default: "Searching for a WHOOP 4.0 or 5.0 strap…"
         }
     }
 

@@ -117,10 +117,13 @@ struct LogTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.s4) {
                 Stamp("0.3 Log · strap")
+                Text(strap.statusLine)
+                    .textStyle(.small)
+                    .foregroundStyle(Palette.inkMuted)
                 alarmSection(strap)
                 Card {
                     VStack(spacing: 0) {
-                        row("Link", stateText(strap.state))
+                        row("Link", strap.state.name)
                         row("Live heart", strap.liveBPM.map { "\($0) BPM" } ?? "—")
                         row("Last sync", strap.lastSync?.formatted(date: .abbreviated, time: .shortened) ?? "Never")
                         row("Last error", strap.lastError ?? "None")
@@ -130,7 +133,14 @@ struct LogTab: View {
                     }
                 }
                 HStack(spacing: Space.s3) {
-                    Button("Find band") { strap.startScan() }.buttonStyle(.ghost)
+                    Button("Find") { strap.find() }.buttonStyle(.ghost)
+                    Button("Retry") { strap.retry() }.buttonStyle(.ghost)
+                }
+                HStack(spacing: Space.s3) {
+                    Button("Disconnect") { strap.disconnect() }.buttonStyle(.ghost)
+                    Button("Forget") { strap.forget() }.buttonStyle(.ghost)
+                }
+                HStack(spacing: Space.s3) {
                     if strap.trace.files.isEmpty {
                         ShareLink(item: report(strap)) { Text("Share log") }.buttonStyle(.ghost)
                     } else {
@@ -166,14 +176,18 @@ struct LogTab: View {
             Text("A result code means the strap accepted the bytes, not that it buzzed. These buttons need a phone; the Simulator cannot reach a strap.")
                 .textStyle(.small)
                 .foregroundStyle(Palette.inkMuted)
-            HStack(spacing: Space.s3) {
-                Button("Buzz") { strap.buzz() }.buttonStyle(.ghost)
-                Button("Arm in +2 min") { strap.armInTwoMinutes() }.buttonStyle(.ghost)
+            Group {
+                HStack(spacing: Space.s3) {
+                    Button("Buzz") { strap.buzz() }.buttonStyle(.ghost)
+                    Button("Arm in +2 min") { strap.armInTwoMinutes() }.buttonStyle(.ghost)
+                }
+                HStack(spacing: Space.s3) {
+                    Button("Read alarm") { strap.readAlarm() }.buttonStyle(.ghost)
+                    Button("Disarm") { strap.disarmAll() }.buttonStyle(.ghost)
+                }
             }
-            HStack(spacing: Space.s3) {
-                Button("Read alarm") { strap.readAlarm() }.buttonStyle(.ghost)
-                Button("Disarm") { strap.disarmAll() }.buttonStyle(.ghost)
-            }
+            .disabled(!strap.canCommand)
+            .opacity(strap.canCommand ? 1 : 0.4)
             if let clock = strap.clockNote {
                 mono(clock)
             }
@@ -244,22 +258,8 @@ struct LogTab: View {
         .overlay(alignment: .bottom) { if !last { Rectangle().fill(Palette.line).frame(height: 1) } }
     }
 
-    private func stateText(_ state: StrapLink.State) -> String {
-        switch state {
-        case .off: "Bluetooth off"
-        case .unauthorized: "Not allowed"
-        case .idle: "Idle"
-        case .scanning: "Scanning"
-        case .connecting: "Connecting"
-        case .bonding: "Bonding"
-        case .syncing: "Syncing history"
-        case .live: "Live"
-        case .failed: "Failed"
-        }
-    }
-
     private func report(_ strap: StrapLink) -> String {
-        var lines = ["Aloft strap log", "state: \(stateText(strap.state))"]
+        var lines = ["Aloft strap log", "state: \(strap.state.name)", strap.statusLine]
         if let counts { lines.append("hr: \(counts.heartRate), rr: \(counts.rr)") }
         if let error = strap.lastError { lines.append("last error: \(error)") }
         if let clock = strap.clockNote { lines.append(clock) }
