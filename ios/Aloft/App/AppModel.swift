@@ -13,6 +13,8 @@ enum Route: Hashable {
     case home
     /// The strap debug screen, reachable without an account.
     case bandCheck
+    /// Set the strap wake time. No phone alarm.
+    case wake
 }
 
 enum OnboardingStep: Int, CaseIterable, Hashable {

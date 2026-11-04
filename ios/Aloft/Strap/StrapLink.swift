@@ -30,6 +30,11 @@ final class StrapLink: NSObject {
     private var connectedAt: Date?
     private var probeNotedMissing = false
     private let memoryKey = "aloft.strap.id"
+    private let wakeKey = "aloft.wake.deadline"
+    private var wakeWatchID = 0
+
+    /// The armed deadline. Nil when nothing is waiting on the strap.
+    private(set) var wakeDeadline: Date?
 
     var state: State { machine.state }
     var canCommand: Bool { machine.canCommand && commandCharacteristic != nil }
@@ -79,6 +84,8 @@ final class StrapLink: NSObject {
             machine.remembered = UUID(uuidString: saved)
         }
         if store == nil { note("store unavailable; history will not be acked") }
+        let storedDeadline = UserDefaults.standard.double(forKey: wakeKey)
+        if storedDeadline > 0 { wakeDeadline = Date(timeIntervalSince1970: storedDeadline) }
         Task { [weak self] in
             await self?.reloadEvents()
             for await bytes in stream { await self?.handle(bytes) }
@@ -137,6 +144,7 @@ final class StrapLink: NSObject {
         if outcome.cancelTimers { timerID += 1 }
         if outcome.cancel, let peripheral {
             central?.cancelPeripheralConnection(peripheral)
+            wakeWatchID += 1
         }
         if outcome.stopScan { central?.stopScan() }
         if outcome.scan { scan() }
@@ -205,6 +213,19 @@ final class StrapLink: NSObject {
     #if DEBUG
     /// Drives the build-4 refusal, without opening Bluetooth, so the Log tab
     /// can show it in the Simulator.
+    func previewWake(hour: Int, minute: Int) {
+        var parts = Calendar.current.dateComponents([.year, .month, .day], from: .now)
+        parts.hour = hour
+        parts.minute = minute
+        parts.second = 0
+        let deadline = Calendar.current.date(from: parts) ?? .now.addingTimeInterval(60 * 60)
+        wakeDeadline = deadline > .now ? deadline : deadline.addingTimeInterval(24 * 60 * 60)
+        let unix = UInt32(wakeDeadline?.timeIntervalSince1970 ?? 0)
+        var body: [UInt8] = [0x04, 0x01, UInt8(unix & 0xFF), UInt8((unix >> 8) & 0xFF), UInt8((unix >> 16) & 0xFF), UInt8(unix >> 24)]
+        body += [UInt8](repeating: 0, count: 15)
+        alarmReadback = CommandResponse(command: 67, originSequence: 1, result: 1, body: body)
+    }
+
     func previewPairingWait() {
         let id = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
         _ = machine.send(.find)
@@ -287,7 +308,90 @@ final class StrapLink: NSObject {
             guard self.state == .ready else { return }
             note("history offload requested")
             write(await history.startFrame())
+            self.rearmSavedWake()
+            self.startSmartWakeWatch()
         }
+    }
+
+    /// Saves the deadline and, when the strap is connected, writes slot 1 and
+    /// reads it back. The window is the 30 minutes before this instant.
+    func armWake(_ deadline: Date) {
+        guard deadline > .now else { return }
+        wakeDeadline = deadline
+        UserDefaults.standard.set(deadline.timeIntervalSince1970, forKey: wakeKey)
+        note("wake saved \(UInt32(deadline.timeIntervalSince1970))")
+        guard readyToSend() else { return }
+        sendArm(deadline)
+        Task { await considerSmartWake() }
+    }
+
+    private func rearmSavedWake() {
+        guard let deadline = wakeDeadline else { return }
+        guard deadline > .now else {
+            clearWake()
+            return
+        }
+        guard readyToSend() else { return }
+        note("re-arm wake")
+        sendArm(deadline)
+    }
+
+    private func sendArm(_ deadline: Date) {
+        let unix = UInt32(deadline.timeIntervalSince1970)
+        switch family {
+        case .whoop5:
+            guard let slot = Whoop5Generation.AlarmSlot(rawValue: 1) else { return }
+            note("arm wake slot 1 at \(unix)")
+            write(whoop5Encoder.setAlarm(slot: slot, unixSeconds: unix))
+            write(whoop5Encoder.getAlarm(slot: slot))
+        case .whoop4:
+            note("arm wake at \(unix)")
+            write(whoop4Encoder.setAlarm(unixSeconds: unix))
+            write(whoop4Encoder.getAlarm())
+        }
+    }
+
+    private func startSmartWakeWatch() {
+        wakeWatchID += 1
+        let id = wakeWatchID
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard let self, id == self.wakeWatchID else { return }
+                await self.considerSmartWake()
+            }
+        }
+    }
+
+    /// Early buzz only inside the window, and only after sleep. Command 19
+    /// does not clear the slot; the disable that follows does, so the
+    /// deadline does not also fire.
+    private func considerSmartWake() async {
+        guard let deadline = wakeDeadline, Date.now < deadline, canCommand, let store else { return }
+        let nowMs = Int64(Date.now.timeIntervalSince1970 * 1000)
+        let from = nowMs - 40 * 60 * 1000
+        let hr = (try? await store.heartRate(fromMs: from, throughMs: nowMs)) ?? []
+        let rr = (try? await store.rrIntervals(fromMs: from, throughMs: nowMs)) ?? []
+        let motion = (try? await store.motion(fromMs: from, throughMs: nowMs)) ?? []
+        let epochs = SleepDetector.epochs(heartRate: hr, rr: rr, motion: motion)
+        let deadlineMs = Int64(deadline.timeIntervalSince1970 * 1000)
+        guard SleepDetector.smartWake(epochs: epochs, nowMs: nowMs, deadlineMs: deadlineMs) == .buzzEarly else { return }
+        note("smart wake: early buzz, clearing the strap alarm")
+        buzz()
+        switch family {
+        case .whoop5:
+            if let slot = Whoop5Generation.AlarmSlot(rawValue: 1) {
+                write(whoop5Encoder.disableAlarm(slot: slot))
+            }
+        case .whoop4:
+            write(whoop4Encoder.disableAlarm())
+        }
+        clearWake()
+    }
+
+    private func clearWake() {
+        wakeDeadline = nil
+        UserDefaults.standard.removeObject(forKey: wakeKey)
     }
 
     /// 5/MG command 19. WHOOP 4 uses command 79. Each builder exists only on
