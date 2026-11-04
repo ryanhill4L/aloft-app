@@ -5,7 +5,7 @@ import SwiftUI
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.paneSplit) private var split
-    @State private var tab: HomeTab = .sky
+    @State private var tab: HomeTab = AppConfig.previewScreen == "log" ? .log : .sky
 
     var body: some View {
         GeometryReader { geo in

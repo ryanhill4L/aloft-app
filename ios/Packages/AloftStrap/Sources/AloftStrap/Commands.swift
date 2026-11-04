@@ -115,8 +115,11 @@ public struct CommandEncoder<G: StrapGeneration>: Sendable {
 }
 
 extension CommandEncoder where G == Whoop5Generation {
-    /// Written once after subscribing, `.withResponse`; it triggers the
-    /// just-works bond. GET_HELLO, seq 1, body `01`.
+    /// GET_HELLO, seq 1, body `01`. Write it `.withResponse` before subscribing
+    /// the fd4b notify characteristics. That confirmed write is what asks iOS
+    /// to start a just-works bond. The bytes are a command, not a key exchange.
+    /// Subscribing fd4b0003/4/5/7 first is refused and wedges the bond
+    /// (noop BLEManager didDiscoverCharacteristics, issue #17).
     public static let clientHello: [UInt8] = [0xAA, 0x01, 0x08, 0x00, 0x00, 0x01, 0xE6, 0x71, 0x23, 0x01, 0x91, 0x01, 0x36, 0x3E, 0x5C, 0x8D]
 
     /// An un-clocked 5/MG does not bank data to flash.
