@@ -1,4 +1,5 @@
 #if DEBUG
+import AloftStrap
 import SwiftUI
 
 /// DEBUG screenshot fixtures: the sample people and numbers from the design
@@ -25,6 +26,18 @@ enum Preview {
         case "wake":
             model.route = .wake
             model.strap.previewWake(hour: 7, minute: 0)
+        case "recap":
+            model.route = .recap
+            model.recap = MorningRecap(
+                asleepSeconds: (7 * 60 + 12) * 60,
+                efficiency: 0.86,
+                onsetMs: 1_762_250_400_000,
+                wakeMs: 1_762_276_800_000,
+                restingBPM: 48,
+                averageBPM: 52,
+                stageNote: SleepNight.stageNote,
+                hasStages: false
+            )
         case "log":
             model.route = .home
             model.strap.previewPairingWait()
