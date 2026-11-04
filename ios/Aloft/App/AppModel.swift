@@ -15,6 +15,8 @@ enum Route: Hashable {
     case bandCheck
     /// Set the strap wake time. No phone alarm.
     case wake
+    /// Last night, after a sync.
+    case recap
 }
 
 enum OnboardingStep: Int, CaseIterable, Hashable {
@@ -83,6 +85,7 @@ final class AppModel {
     var crew: Aloft_V1_Crew?
     var lifts: [Aloft_V1_Lift] = []
     var today = Today()
+    var recap: MorningRecap?
     var error: String?
     var busy = false
 
@@ -105,6 +108,28 @@ final class AppModel {
 
     static var storeURL: URL {
         URL.applicationSupportDirectory.appending(path: "Aloft/\(StrapStore.fileName)")
+    }
+
+    private let recapKey = "aloft.recap.onset"
+
+    /// Reads the last 18 hours and, once a night has a wake, posts the line.
+    /// Preview never notifies.
+    func publishMorningRecap() async {
+        guard !isPreview, let store = strap.store else { return }
+        let nowMs = Int64(Date.now.timeIntervalSince1970 * 1000)
+        let from = nowMs - 18 * 60 * 60 * 1000
+        guard let hr = try? await store.heartRate(fromMs: from, throughMs: nowMs),
+              let rr = try? await store.rrIntervals(fromMs: from, throughMs: nowMs),
+              let motion = try? await store.motion(fromMs: from, throughMs: nowMs) else { return }
+        let night = SleepDetector.detect(heartRate: hr, rr: rr, motion: motion)
+        guard let recap = MorningRecap.from(night: night, heartRate: hr) else { return }
+        self.recap = recap
+        let already: Int64? = UserDefaults.standard.object(forKey: recapKey).map { _ in
+            Int64(UserDefaults.standard.integer(forKey: recapKey))
+        }
+        guard recap.shouldNotify(alreadyNotifiedOnsetMs: already) else { return }
+        await RecapNotifier.post(recap)
+        if let onset = recap.onsetMs { UserDefaults.standard.set(Int(onset), forKey: recapKey) }
     }
 
     func start() async {

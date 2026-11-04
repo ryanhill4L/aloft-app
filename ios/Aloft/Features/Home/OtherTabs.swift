@@ -314,6 +314,9 @@ struct YouTab: View {
                     ValueRow(label: "Wake", value: model.strap.wakeDeadline?.formatted(date: .omitted, time: .shortened) ?? "Set") {
                         model.route = .wake
                     }
+                    ValueRow(label: "Last night", value: model.recap.map { MorningRecap.hoursMinutes($0.asleepSeconds) } ?? "None") {
+                        model.route = .recap
+                    }
                 }
                 Text("Scores are on-device estimates, not WHOOP’s models and not medical advice. Aloft is not affiliated with WHOOP.")
                     .textStyle(.small).foregroundStyle(Palette.inkMuted)

@@ -10,6 +10,7 @@ struct AloftApp: App {
             RootView()
                 .environment(model)
                 .task { await model.start() }
+                .task(id: model.strap.lastSync) { await model.publishMorningRecap() }
                 .onChange(of: scenePhase) { _, phase in
                     // Fold the WAL into the main file when leaving the foreground.
                     if phase == .background, let store = model.strap.store {
@@ -44,6 +45,8 @@ struct RootView: View {
                     BandCheckView()
                 case .wake:
                     WakeView()
+                case .recap:
+                    RecapView()
                 }
             }
             .animation(.smooth(duration: 0.25), value: model.route)
