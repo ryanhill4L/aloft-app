@@ -311,9 +311,6 @@ struct YouTab: View {
                     ValueRow(label: "Height", value: p.heightCm > 0 ? BasicsStep.height(Double(p.heightCm), metric: false) : "—") {}
                     ValueRow(label: "Weight", value: p.weightKg > 0 ? BasicsStep.weight(Double(p.weightKg), metric: false) : "—") {}
                     ValueRow(label: "Nights", value: String(format: "%02d:%02d – %02d:%02d", p.bedtimeMinutes / 60, p.bedtimeMinutes % 60, p.wakeMinutes / 60, p.wakeMinutes % 60)) {}
-                    ValueRow(label: "Wake", value: model.strap.wakeDeadline?.formatted(date: .omitted, time: .shortened) ?? "Set") {
-                        model.route = .wake
-                    }
                     ValueRow(label: "Last night", value: model.recap.map { MorningRecap.hoursMinutes($0.asleepSeconds) } ?? "None") {
                         model.route = .recap
                     }

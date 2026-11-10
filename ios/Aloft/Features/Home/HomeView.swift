@@ -1,3 +1,4 @@
+import AloftStrap
 import SwiftUI
 
 /// 11 Home: Sky, Crew, Log, You. A floating pill when the window is narrow,
@@ -65,6 +66,7 @@ struct SkyTab: View {
                     Spacer().frame(height: size.height * 0.43 - 128)
                     score
                     sentence(long: true)
+                    wakeCard
                     ceiling("0.2 Ceiling")
                     crewStrip
                 }
@@ -104,6 +106,7 @@ struct SkyTab: View {
 
     private var rightPage: some View {
         VStack(alignment: .leading, spacing: Space.s5) {
+            wakeCard
             ceiling("0.2 Ceiling")
             Grid(alignment: .leading, horizontalSpacing: Space.s4) {
                 GridRow {
@@ -141,6 +144,7 @@ struct SkyTab: View {
             .frame(height: size.height / 2 - 8)
             VStack(alignment: .leading, spacing: 20) {
                 sentence(long: true)
+                wakeCard
                 ceiling("0.2 Ceiling")
                 Grid(alignment: .leading, horizontalSpacing: Space.s3) {
                     GridRow {
@@ -192,6 +196,26 @@ struct SkyTab: View {
         return (Text(lead + " ").foregroundStyle(Palette.ink) + Text(rest).foregroundStyle(Palette.inkMuted))
             .textStyle(.body)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var wakeCard: some View {
+        let next = WakeSchedule.nextDeadline(model.strap.schedule, now: .now)
+        let title = next?.formatted(.dateTime.weekday(.abbreviated).hour().minute()) ?? "Off"
+        return Button { model.route = .wake } label: {
+            HStack(spacing: Space.s3) {
+                VStack(alignment: .leading, spacing: Space.s1) {
+                    Stamp("Wake")
+                    Text(title).textStyle(.heading).foregroundStyle(Palette.ink)
+                }
+                Spacer()
+                Text("Schedule").textStyle(.small).foregroundStyle(Palette.inkMuted)
+            }
+            .padding(Space.s4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.raised, in: RoundedRectangle(cornerRadius: Radius.lg, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Wake \(title)")
     }
 
     private func ceiling(_ label: String) -> some View {

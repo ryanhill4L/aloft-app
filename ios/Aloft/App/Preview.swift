@@ -51,7 +51,9 @@ enum Preview {
             model.crew = nil
             model.lifts = []
             model.route = .home
-        default: model.route = .home
+        default:
+            model.route = .home
+            model.strap.previewWake(hour: 7, minute: 0)
         }
     }
 
