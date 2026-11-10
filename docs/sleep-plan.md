@@ -13,6 +13,8 @@ Ryan, 2026-11-04:
 
 The 5/MG `SET_ALARM_TIME` revision-4 record is one epoch. It has no window field (NOOP `docs/PROTOCOL_ALARMS.md`, WHOOP 5/MG section). The guaranteed buzz is armed at the end of the window. An earlier buzz, if the phone is connected and the minute is a stir or a wake, is a separate strap buzz, then the slot is cleared so the deadline does not fire again.
 
+The week repeats on the phone. Aloft arms only the next enabled morning, on slot 1, and writes the following one after that buzz. Whether slots 2–6 can be pre-armed with later mornings, so a night with no phone still buzzes, is open. It has not been tried on this strap.
+
 ## What already exists
 
 | Piece | Where | State |

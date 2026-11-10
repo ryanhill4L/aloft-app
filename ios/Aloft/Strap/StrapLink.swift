@@ -31,9 +31,12 @@ final class StrapLink: NSObject {
     private var probeNotedMissing = false
     private let memoryKey = "aloft.strap.id"
     private let wakeKey = "aloft.wake.deadline"
+    private let scheduleKey = "aloft.wake.schedule"
     private var wakeWatchID = 0
 
-    /// The armed deadline. Nil when nothing is waiting on the strap.
+    /// The week. Off until a day is turned on. This is what gets armed.
+    private(set) var schedule = WeeklyWake.off
+    /// The next buzz slot 1 is holding, when one is scheduled.
     private(set) var wakeDeadline: Date?
 
     var state: State { machine.state }
@@ -84,8 +87,11 @@ final class StrapLink: NSObject {
             machine.remembered = UUID(uuidString: saved)
         }
         if store == nil { note("store unavailable; history will not be acked") }
-        let storedDeadline = UserDefaults.standard.double(forKey: wakeKey)
-        if storedDeadline > 0 { wakeDeadline = Date(timeIntervalSince1970: storedDeadline) }
+        if let data = UserDefaults.standard.data(forKey: scheduleKey),
+           let stored = try? JSONDecoder().decode(WeeklyWake.self, from: data) {
+            schedule = stored
+        }
+        wakeDeadline = WakeSchedule.nextDeadline(schedule, now: .now)
         Task { [weak self] in
             await self?.reloadEvents()
             for await bytes in stream { await self?.handle(bytes) }
@@ -214,12 +220,8 @@ final class StrapLink: NSObject {
     /// Drives the build-4 refusal, without opening Bluetooth, so the Log tab
     /// can show it in the Simulator.
     func previewWake(hour: Int, minute: Int) {
-        var parts = Calendar.current.dateComponents([.year, .month, .day], from: .now)
-        parts.hour = hour
-        parts.minute = minute
-        parts.second = 0
-        let deadline = Calendar.current.date(from: parts) ?? .now.addingTimeInterval(60 * 60)
-        wakeDeadline = deadline > .now ? deadline : deadline.addingTimeInterval(24 * 60 * 60)
+        schedule = .everyDay(minutes: hour * 60 + minute)
+        wakeDeadline = WakeSchedule.nextDeadline(schedule, now: .now)
         let unix = UInt32(wakeDeadline?.timeIntervalSince1970 ?? 0)
         var body: [UInt8] = [0x04, 0x01, UInt8(unix & 0xFF), UInt8((unix >> 8) & 0xFF), UInt8((unix >> 16) & 0xFF), UInt8(unix >> 24)]
         body += [UInt8](repeating: 0, count: 15)
@@ -313,27 +315,50 @@ final class StrapLink: NSObject {
         }
     }
 
-    /// Saves the deadline and, when the strap is connected, writes slot 1 and
-    /// reads it back. The window is the 30 minutes before this instant.
-    func armWake(_ deadline: Date) {
-        guard deadline > .now else { return }
-        wakeDeadline = deadline
-        UserDefaults.standard.set(deadline.timeIntervalSince1970, forKey: wakeKey)
-        note("wake saved \(UInt32(deadline.timeIntervalSince1970))")
-        guard readyToSend() else { return }
-        sendArm(deadline)
-        Task { await considerSmartWake() }
+    /// Saves the week and arms slot 1 for the next enabled morning, or disarms
+    /// when every day is off. The 30-minute window still ends at that morning.
+    func updateSchedule(_ week: WeeklyWake) {
+        schedule = week
+        if let data = try? JSONEncoder().encode(week) {
+            UserDefaults.standard.set(data, forKey: scheduleKey)
+        }
+        applySchedule(watch: true)
     }
 
-    private func rearmSavedWake() {
-        guard let deadline = wakeDeadline else { return }
-        guard deadline > .now else {
-            clearWake()
-            return
+    private func rearmSavedWake(after: Date = .now) {
+        applySchedule(now: after, watch: false)
+    }
+
+    /// Writes the next occurrence after `now`, or clears slot 1. Does not forget the week.
+    private func applySchedule(now: Date = .now, watch: Bool) {
+        switch WakeSchedule.decision(schedule, now: now, calendar: .current) {
+        case .disarm:
+            wakeDeadline = nil
+            UserDefaults.standard.removeObject(forKey: wakeKey)
+            note("wake off")
+            disarmWakeSlot()
+        case let .arm(deadline):
+            wakeDeadline = deadline
+            UserDefaults.standard.set(deadline.timeIntervalSince1970, forKey: wakeKey)
+            note("wake \(UInt32(deadline.timeIntervalSince1970))")
+            guard readyToSend() else { return }
+            sendArm(deadline)
+            if watch { Task { await considerSmartWake() } }
         }
+    }
+
+    private func disarmWakeSlot() {
         guard readyToSend() else { return }
-        note("re-arm wake")
-        sendArm(deadline)
+        switch family {
+        case .whoop5:
+            if let slot = Whoop5Generation.AlarmSlot(rawValue: 1) {
+                note("disarm wake slot 1")
+                write(whoop5Encoder.disableAlarm(slot: slot))
+            }
+        case .whoop4:
+            note("disarm wake")
+            write(whoop4Encoder.disableAlarm())
+        }
     }
 
     private func sendArm(_ deadline: Date) {
@@ -376,22 +401,11 @@ final class StrapLink: NSObject {
         let epochs = SleepDetector.epochs(heartRate: hr, rr: rr, motion: motion)
         let deadlineMs = Int64(deadline.timeIntervalSince1970 * 1000)
         guard SleepDetector.smartWake(epochs: epochs, nowMs: nowMs, deadlineMs: deadlineMs) == .buzzEarly else { return }
-        note("smart wake: early buzz, clearing the strap alarm")
+        note("smart wake: early buzz, arming the next morning")
+        let fired = deadline
         buzz()
-        switch family {
-        case .whoop5:
-            if let slot = Whoop5Generation.AlarmSlot(rawValue: 1) {
-                write(whoop5Encoder.disableAlarm(slot: slot))
-            }
-        case .whoop4:
-            write(whoop4Encoder.disableAlarm())
-        }
-        clearWake()
-    }
-
-    private func clearWake() {
-        wakeDeadline = nil
-        UserDefaults.standard.removeObject(forKey: wakeKey)
+        disarmWakeSlot()
+        applySchedule(now: fired, watch: false)
     }
 
     /// 5/MG command 19. WHOOP 4 uses command 79. Each builder exists only on
@@ -534,6 +548,7 @@ final class StrapLink: NSObject {
             if frame.type == .event {
                 if let event = frame.strapEvent {
                     note("event \(event.label) ts \(event.unixSeconds)")
+                    if event.id == 57 || event.id == 58 { rearmSavedWake(after: wakeDeadline ?? .now) }
                     if let store {
                         do {
                             try await store.insert([event])
@@ -566,6 +581,7 @@ final class StrapLink: NSObject {
             case .complete:
                 lastSync = .now
                 note("history complete")
+                rearmSavedWake()
             case .collected, .ignored:
                 break
             }
